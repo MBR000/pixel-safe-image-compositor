@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Generated artifacts - never commit real images or AI outputs
+out/
+dist/
+*.generated.png

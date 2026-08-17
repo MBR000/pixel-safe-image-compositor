@@ -1,0 +1,12 @@
+# Codex agent metadata for the pixel-safe-image-compositor skill.
+name: pixel-safe-image-compositor
+description: >-
+  Composite images where a visual AI designs layout, background, and creative
+  transitions, while programmatic mask restoration and SHA-256 pixel
+  verification guarantee the protected source region is never repainted.
+version: 1.0.0
+license: MIT
+entry: SKILL.md
+scripts:
+  preflight: scripts/preflight_composition.py
+  restore_and_verify: scripts/restore_and_verify.py
