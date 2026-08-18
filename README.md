@@ -1,5 +1,7 @@
 # pixel-safe-image-compositor
 
+English | [简体中文](README.zh-CN.md)
+
 Let the visual AI own composition and background creativity — but never let it
 touch the protected pixels. The AI plans and paints; the program restores and
 verifies.
@@ -99,7 +101,27 @@ pixel-safe-image-compositor/
 
 ## Installation
 
-### As a Codex / agent skill
+### Recommended: let your agent install it
+
+No manual steps needed — paste this prompt into any coding agent
+(Codex, Claude Code, Cursor, ...) and let it install and verify the skill:
+
+```text
+Install this skill for me. Repository:
+https://github.com/MBR000/pixel-safe-image-compositor
+
+Steps:
+1. Clone the repository.
+2. Copy the whole pixel-safe-image-compositor directory into your skills
+   directory (e.g. ~/.codex/skills/ or the equivalent for this environment).
+3. Install dependencies: pip install -r requirements.txt (use a venv if needed).
+4. Run python -m unittest discover -s tests inside the installed copy and
+   confirm every test passes.
+
+When done, report: the installed path, the skill name, and the test result.
+```
+
+### Manual install
 
 Clone or copy this directory into your agent's skills directory, e.g.:
 
@@ -244,6 +266,25 @@ recorded; IO failures still write a report; visual-review schema, pass, and
 fail paths behave correctly; the unified runner passes end to end, stops on
 preflight failure, and fails on a failed review; and both `smooth_mask.py`
 modes produce binary masks that improve the geometry.
+
+## Security
+
+The scripts are deliberately designed to be easy to audit before you run
+them:
+
+- **No network access.** There are no socket / HTTP / API imports anywhere.
+  Nothing is uploaded or downloaded, and no API keys are read.
+- **No arbitrary command execution.** No `eval`, `exec`, `os.system`, or
+  `shell=True`. The only `subprocess` use is `run_compositor.py` invoking
+  the sibling scripts in this repository with fixed arguments.
+- **File-in, file-out only.** Every script reads and writes only the paths
+  you pass explicitly on the command line.
+- **Minimal dependencies.** Python standard library plus `numpy` and
+  `Pillow`. Image parsers occasionally have CVEs, so keep Pillow up to date
+  and treat untrusted input images with the usual caution.
+- **Small, reviewable codebase.** A few hundred lines across five scripts.
+  Reading `scripts/` before running is encouraged — especially before
+  pasting the agent-install prompt above.
 
 ## Acknowledgements
 
