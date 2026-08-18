@@ -95,8 +95,13 @@ guarantee into code:
 
 ```
 pixel-safe-image-compositor/
-├── SKILL.md                        # the skill: full workflow, constraints, prompts
+├── SKILL.md                        # lean skill core: workflow + hard rules
 ├── README.md
+├── references/                     # loaded on demand by the agent
+│   ├── plan-schema.md              # full composition-plan.json schema + examples
+│   ├── geometry-gates.md           # per-mode mask geometry gates in detail
+│   ├── generation-guide.md         # Stage A/B guidance + verbatim prohibitions
+│   └── scripts.md                  # detailed script docs + review schema
 ├── agents/
 │   └── openai.yaml                 # Codex agent metadata
 ├── scripts/
@@ -164,7 +169,7 @@ the illustration redraws, field and quiet shares, `quiet_texture`, torn
 paper edge treatment, one structural chromatic accent, optional
 micro-text), the `preview_review_requirements` commitments, and — in
 `photo_echo` mode — a `seam` declaration anchoring the tear to a content
-line of the photo. See `SKILL.md` for the full schema.
+line of the photo. See `references/plan-schema.md` for the full schema.
 
 ### 2. Build and smooth the mask
 

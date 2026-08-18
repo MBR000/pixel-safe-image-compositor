@@ -1,0 +1,54 @@
+# Two-stage AI generation guide
+
+Read this before writing every generation prompt.
+
+## Stage A: paper, illustration field, background
+
+Generate the paper, the LARGE illustration field (per
+`atmosphere.illustration_grammar` and `illustration_field_share`), the
+chromatic accent structure, and the background. The illustration MUST
+redraw the planned `photo_echo_subjects` - the photo's own subjects,
+horizon, buildings, sun - in the chosen grammar, at meaningful scale.
+In `photo_echo` mode the illustrated layer continues the photo's scene
+across the seam: the `seam.anchor` content line flows through the tear
+and the same landmarks appear on both sides in two languages. Quiet
+zones are laid in with the planned `quiet_texture` (washes, halftone
+grain, paper fiber) - never left as blank untextured paper.
+
+## Stage B: transitions, torn edge, micro-text
+
+Generate the detached, locally open transition shapes, the torn-paper
+fibrous edge along the OUTSIDE of the protected boundary (in
+`photo_echo`, along the seam), and the micro-text line (when planned) -
+all strictly outside the protected region.
+
+## Stage C: programmatic restore (not AI)
+
+`restore_and_verify.py` pastes back the protected source pixels and
+verifies them per pixel with SHA-256.
+
+Never treat any AI output as evidence that the source pixels survived.
+The torn edge, fiber fringe, speckles, and every other tactile treatment
+are painted outside the protected pixels; the restore stage overwrites
+anything that strayed inside, so plan the tear to survive restoration.
+
+## Prompt prohibitions (include verbatim in every generation prompt)
+
+The generation prompt must explicitly forbid:
+
+- repainting the protected region;
+- adding new people or animals;
+- sticker-style borders;
+- continuous outlining;
+- uniform halos;
+- long straight edges;
+- regular sawtooth;
+- tracing parallel to the protected outline;
+- full-image filters;
+- AI-generated text other than the single planned `micro_text` line;
+- timid peripheral doodles instead of a real illustration field;
+- illustration content unrelated to the photo - the field must redraw the
+  planned `photo_echo_subjects`;
+- blank untextured quiet zones - lay in the planned `quiet_texture`;
+- detached decorative color patches unrelated to source geometry;
+- clean digital clipping edges where a torn-paper edge was planned.

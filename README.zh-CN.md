@@ -77,8 +77,13 @@ SHA-256 校验。AI 渲染结果永远不会被当作源图保真的证明。
 
 ```
 pixel-safe-image-compositor/
-├── SKILL.md                        # skill 本体：完整流程、约束、prompt 指南
+├── SKILL.md                        # skill 精简核心：工作流 + 硬规则
 ├── README.md
+├── references/                     # agent 按需加载的详细参考
+│   ├── plan-schema.md              # composition-plan.json 完整 schema 与示例
+│   ├── geometry-gates.md           # 各模式 mask 几何门禁细则
+│   ├── generation-guide.md         # Stage A/B 指南与逐字 prompt 禁令
+│   └── scripts.md                  # 脚本详细文档与复检 schema
 ├── agents/
 │   └── openai.yaml                 # Codex agent 元数据
 ├── scripts/
@@ -143,7 +148,7 @@ AI 输出 `composition-plan.json`，描述 `focal_group`、`eye_path`、
 `photo_echo_subjects`、场域与留白占比、`quiet_texture`、撕纸边缘处理、
 单一结构性色彩强调、可选微型文字）、`preview_review_requirements`
 承诺项，以及——在 `photo_echo` 模式下——把撕缝锚定到照片内容线的
-`seam` 声明。完整 schema 见 `SKILL.md`。
+`seam` 声明。完整 schema 见 `references/plan-schema.md`。
 
 ### 2. 构建并平滑 mask
 
