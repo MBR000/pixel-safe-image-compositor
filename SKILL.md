@@ -1,7 +1,6 @@
 ---
 name: pixel-safe-image-compositor
 description: This skill should be used when compositing images where a visual AI designs the layout, background, and creative transitions, while programmatic mask restoration and SHA-256 pixel verification guarantee that a protected source region is never repainted by the AI. It supports subject_cutout, organic_context, and photo_window modes with preflight mask geometry validation.
-agent_created: true
 ---
 
 # Pixel-Safe Image Compositor

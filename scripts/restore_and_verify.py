@@ -77,11 +77,15 @@ def main():
                       % manifest.get("alpha_policy"))
 
     placement = manifest.get("placement") or {}
-    try:
-        px, py = int(placement["x"]), int(placement["y"])
-        pw, ph = int(placement["width"]), int(placement["height"])
-    except (KeyError, TypeError, ValueError):
-        errors.append("placement must provide integer x, y, width, height")
+    placement_values = [placement.get(k) for k in ("x", "y", "width", "height")]
+    # bool is an int subclass, and int() silently truncates floats/parses
+    # strings, so require exact int type instead of coercing.
+    if all(type(v) is int for v in placement_values):
+        px, py, pw, ph = placement_values
+    else:
+        errors.append(
+            "placement x, y, width, height must all be integers (no floats, "
+            "strings, or booleans), got %r" % (placement,))
         px = py = pw = ph = 0
 
     base_dir = os.path.dirname(os.path.abspath(args.manifest))

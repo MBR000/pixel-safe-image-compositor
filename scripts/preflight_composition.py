@@ -185,6 +185,10 @@ def validate_plan(plan, errors, warnings):
     for s in ("large", "medium", "small"):
         if s not in scales:
             errors.append("edge_profile.variation_scales missing: %s" % s)
+        elif scales[s] is not True:
+            errors.append(
+                "edge_profile.variation_scales.%s must be true, got %r"
+                % (s, scales[s]))
     if edge.get("no_sawtooth") is not True:
         errors.append("edge_profile.no_sawtooth must be true")
     if edge.get("detached_transition") is not True:
@@ -200,6 +204,9 @@ def validate_plan(plan, errors, warnings):
     for f in REQUIRED_REVIEW_FIELDS:
         if f not in review:
             errors.append("preview_review missing field: %s" % f)
+        elif review[f] is not True:
+            errors.append(
+                "preview_review.%s must be true, got %r" % (f, review[f]))
     return mode
 
 
