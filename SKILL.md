@@ -15,13 +15,20 @@ source. An AI render is never accepted as proof of source fidelity.
 ## Workflow overview
 
 1. The visual AI outputs `composition-plan.json` (planning only, no pixels yet).
-2. Run `scripts/preflight_composition.py` to validate the plan and the mask.
+2. Build the protected-region mask. Use `scripts/smooth_mask.py` to apply
+   Chaikin corner cutting to an outline polygon, or to blur-smooth a rough
+   mask. The mask must be binary (0/255): preflight binarizes at >127 while
+   restore pastes source alpha>0, so anti-aliased masks make the approved
+   and restored shapes diverge.
+3. Run `scripts/preflight_composition.py` to validate the plan and the mask.
+   Pass `--source` so the mask preview shows the real source content.
    Fix all errors before any generation. Exit code 1 means stop.
-3. Generate with the AI in two stages (see below).
-4. Run `scripts/restore_and_verify.py` to paste back the protected pixels and
-   verify them with SHA-256. Any mismatch yields `verified=false` and a
-   non-zero exit code.
-5. Perform a final visual review against the `preview_review` checklist and
+4. Generate with the AI in two stages (see below).
+5. Run `scripts/restore_and_verify.py` with `--plan composition-plan.json`
+   to paste back the protected pixels, confirm the manifest executes the
+   approved plan, and verify with SHA-256. Any mismatch yields
+   `verified=false` and a non-zero exit code.
+6. Perform a final visual review against the `preview_review` checklist and
    write `final-visual-review.json`.
 
 ## Step 1: composition-plan.json
@@ -102,6 +109,9 @@ A rectangular window is allowed ONLY when the plan explicitly declares:
 ```
 
 Without both declarations, a rectangular mask is rejected by preflight.
+Conversely, a `photo_window` plan requires a near-rectangular mask
+(rectangularity >= 0.98); declaring `photo_window` with an organic mask is
+also rejected.
 
 ## Step 3: two-stage AI generation, then programmatic restore
 
@@ -130,7 +140,23 @@ The generation prompt must explicitly forbid:
 
 ## Scripts
 
-Both scripts need Python 3 with `numpy` and `Pillow`. No other dependencies.
+All scripts need Python 3 with `numpy` and `Pillow`
+(`pip install -r requirements.txt`). No other dependencies.
+
+### Mask smoothing
+
+```bash
+# Chaikin corner cutting on an outline polygon, rasterized to a binary mask
+python scripts/smooth_mask.py --polygon points.json --canvas 1024x1024 \
+    --out mask.png --iterations 3
+
+# Blur-smooth an existing rough mask (rounds corners, removes sawtooth)
+python scripts/smooth_mask.py --mask rough-mask.png --out mask.png \
+    --blur-radius 6 --passes 2
+```
+
+Always re-run preflight on the smoothed mask; smoothing helps meet the
+geometry limits but does not guarantee them.
 
 ### Preflight validation
 
@@ -139,16 +165,22 @@ python scripts/preflight_composition.py \
     --plan composition-plan.json \
     --mask mask.png \
     --out composition.preflight.json \
-    --mask-preview mask-preview.png
+    --mask-preview mask-preview.png \
+    --source source.png
 ```
 
-Reads the plan, validates required fields, mode, `window.type`, and
-`edge_profile`; loads the mask and rejects empty masks; computes
+Reads the plan, validates required fields, mode, `window.type`,
+`edge_profile` (all `variation_scales` must be `true`), and the
+`preview_review` checklist (all entries must be `true`); loads the mask,
+rejects empty masks, and warns on anti-aliased (non-binary) masks; computes
 rectangularity; checks that horizontal and vertical contours are broken;
 measures the longest continuous straight edge in horizontal, vertical, and
-diagonal directions. In organic modes, any threshold violation exits with
-code 1. Writes a JSON report with `verified`, `errors`, `warnings`, and
-`mask_metrics`, and optionally renders `mask-preview.png`.
+diagonal directions; detects regular periodic sawtooth on every contour. In
+organic modes, any threshold violation exits with code 1. `photo_window`
+requires a near-rectangular mask. Writes a JSON report with `verified`,
+`errors`, `warnings`, and `mask_metrics`, and optionally renders
+`mask-preview.png` (with `--source`, the preview shows the real source
+content inside the protected region and a dimmed source outside).
 
 ### Restore and verify
 
@@ -156,16 +188,22 @@ code 1. Writes a JSON report with `verified`, `errors`, `warnings`, and
 python scripts/restore_and_verify.py \
     --ai-base final_ai_base.png \
     --manifest manifest.json \
+    --plan composition-plan.json \
     --out final.png \
     --report final.verification.json
 ```
 
 The manifest points to the RGBA source cutout and its integer `placement`
-with `alpha_policy: "nontransparent"`. Only non-transparent source pixels are
+(strict integers; floats, strings, and booleans are rejected) with
+`alpha_policy: "nontransparent"`. Only non-transparent source pixels are
 pasted back. Scaling, rotation, and perspective transforms of the protected
-region are rejected. The script writes a PNG, re-reads it from disk, compares
-SHA-256 of the protected pixels, and returns a non-zero exit code with
-`verified=false` on any mismatch.
+region are rejected. With `--plan`, the manifest `placement` and `mode` must
+match the preflight-approved plan. The script writes a PNG, re-reads it from
+disk, compares SHA-256 of the protected pixels, and returns a non-zero exit
+code with `verified=false` on any mismatch. The report also records the
+SHA-256 of the source file (and of the plan file when given) for auditing.
+Usage/IO failures (exit code 2) also write a `verified=false` report so a
+stale report can never be mistaken for a fresh result.
 
 ## Deliverables
 
@@ -180,10 +218,16 @@ All final image outputs must be PNG. Deliver together:
 
 ## Minimal validation for this skill
 
-- `quick_validate.py` from skill-creator passes on this directory.
-- Both scripts pass `py_compile`.
-- A free-form mask passes preflight.
-- A rectangular mask is rejected in organic modes.
-- A mask with a long straight edge is rejected in organic modes.
-- A rectangular mask passes when the plan explicitly declares
-  `mode: photo_window` and `window.type: rectangle_mask`.
+Run the test suite from the repository root:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+It covers: a free-form mask passing preflight; rectangular masks, long
+straight edges, and regular sawtooth rejected in organic modes; `false`
+checklist values rejected; `photo_window` accepting rectangles and rejecting
+organic masks; anti-aliased mask warnings; the source-overlay preview;
+non-integer placement rejection; the restore round-trip with zero mismatch;
+plan/manifest cross-checks; report files written on IO failure; and both
+smoothing modes of `smooth_mask.py`.

@@ -49,6 +49,47 @@ def sha256_of_pixels(arr_rgba, mask):
     return hashlib.sha256(arr_rgba[mask].tobytes()).hexdigest()
 
 
+def sha256_of_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def usage_failure(args, message):
+    """Report a usage/IO failure (exit 2) so callers never read a stale report."""
+    print(message, file=sys.stderr)
+    try:
+        with open(args.report, "w", encoding="utf-8") as fh:
+            json.dump({"verified": False, "errors": [message]}, fh, indent=2)
+            fh.write("\n")
+    except OSError:
+        pass
+    return 2
+
+
+def cross_check_plan(plan, manifest, errors):
+    """Verify the manifest executes the preflight-approved plan."""
+    plan_placement = plan.get("placement")
+    if not isinstance(plan_placement, dict):
+        errors.append("plan cross-check: plan.placement must be an object "
+                      "with x, y, width, height")
+        return
+    manifest_placement = manifest.get("placement") or {}
+    for key in ("x", "y", "width", "height"):
+        if plan_placement.get(key) != manifest_placement.get(key):
+            errors.append(
+                "plan cross-check: placement.%s mismatch (plan=%r, "
+                "manifest=%r); the manifest must execute the approved plan"
+                % (key, plan_placement.get(key), manifest_placement.get(key)))
+    plan_mode = plan.get("mode")
+    manifest_mode = manifest.get("mode")
+    if manifest_mode is not None and plan_mode != manifest_mode:
+        errors.append("plan cross-check: mode mismatch (plan=%r, manifest=%r)"
+                      % (plan_mode, manifest_mode))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--ai-base", required=True,
@@ -56,6 +97,9 @@ def main():
     parser.add_argument("--manifest", required=True, help="manifest JSON path")
     parser.add_argument("--out", required=True, help="final PNG output path")
     parser.add_argument("--report", required=True, help="verification JSON path")
+    parser.add_argument("--plan", default=None,
+                        help="optional composition-plan.json; when given, the "
+                             "manifest placement and mode must match the plan")
     args = parser.parse_args()
 
     errors = []
@@ -63,8 +107,15 @@ def main():
     try:
         manifest = load_json(args.manifest)
     except (OSError, json.JSONDecodeError) as exc:
-        print("cannot read manifest: %s" % exc, file=sys.stderr)
-        return 2
+        return usage_failure(args, "cannot read manifest: %s" % exc)
+
+    plan = None
+    if args.plan:
+        try:
+            plan = load_json(args.plan)
+        except (OSError, json.JSONDecodeError) as exc:
+            return usage_failure(args, "cannot read plan: %s" % exc)
+        cross_check_plan(plan, manifest, errors)
 
     for key in FORBIDDEN_TRANSFORM_KEYS:
         if key in manifest or key in (manifest.get("placement") or {}):
@@ -96,12 +147,12 @@ def main():
     if errors:
         return finish(args, None, errors)
 
+    source_abs = os.path.join(base_dir, source_path)
     try:
-        src = Image.open(os.path.join(base_dir, source_path)).convert("RGBA")
+        src = Image.open(source_abs).convert("RGBA")
         base = Image.open(args.ai_base).convert("RGBA")
     except OSError as exc:
-        print("cannot read image: %s" % exc, file=sys.stderr)
-        return 2
+        return usage_failure(args, "cannot read image: %s" % exc)
 
     sw, sh = src.size
     if (pw, ph) != (sw, sh):
@@ -128,7 +179,7 @@ def main():
     region = base_arr[py:py + ph, px:px + pw]
     region[mask] = src_arr[mask]
 
-    Image.fromarray(base_arr, "RGBA").save(args.out, "PNG")
+    Image.fromarray(base_arr).save(args.out, "PNG")
 
     # Re-read the written PNG and verify protected pixels with SHA-256.
     final_arr = np.asarray(Image.open(args.out).convert("RGBA"))
@@ -149,8 +200,11 @@ def main():
         "mismatched_pixel_count": mismatched,
         "sha256_expected": expected,
         "sha256_actual": actual,
+        "source_file_sha256": sha256_of_file(source_abs),
         "errors": errors,
     }
+    if args.plan:
+        result["plan_file_sha256"] = sha256_of_file(args.plan)
     return finish(args, result, errors)
 
 

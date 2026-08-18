@@ -69,6 +69,8 @@ RECTANGULARITY_ERROR = 0.90      # mask_area / bbox_area above this = rectangle
 RECTANGULARITY_WARN = 0.75
 MIN_QUIET_BUFFER_PX = 8
 CONTOUR_BROKEN_MIN = 0.20        # min fraction of boundary rows/cols that must vary
+SAWTOOTH_REGULARITY_ERROR = 0.90  # periodic zigzag match fraction above this
+PHOTO_WINDOW_RECT_MIN = 0.98     # photo_window masks must be near-rectangular
 
 
 def load_json(path):
@@ -100,6 +102,34 @@ def modal_fraction(seq):
         return 0.0
     values, counts = np.unique(seq, return_counts=True)
     return float(counts.max() / len(seq))
+
+
+def sawtooth_regularity(seq):
+    """Detect a regular periodic zigzag in a boundary sequence.
+
+    Looks for a period p such that the first differences repeat with high
+    fidelity AND oscillate in both directions (up-down spikes). Smooth curves
+    and plain straight edges do not qualify: straight edges have single-sign
+    or zero differences, and smooth curves are not exactly periodic.
+
+    Returns (period, match_fraction); (0, 0.0) when no regular zigzag exists.
+    """
+    diffs = np.diff(np.asarray(seq))
+    n = len(diffs)
+    if n < 16:
+        return 0, 0.0
+    # A sawtooth keeps moving; sparse noise on a flat edge does not count.
+    if np.count_nonzero(diffs) / n < 0.5:
+        return 0, 0.0
+    best_period, best_frac = 0, 0.0
+    for p in range(2, min(64, n // 4) + 1):
+        window = diffs[:p]
+        if window.min() >= 0 or window.max() <= 0:
+            continue
+        frac = float(np.mean(diffs[p:] == diffs[:-p]))
+        if frac > best_frac:
+            best_period, best_frac = p, frac
+    return best_period, best_frac
 
 
 def boundary_sequences(mask):
@@ -139,6 +169,13 @@ def analyze_mask(mask):
         longest_slope_run(right, 1), longest_slope_run(right, -1),
     )
 
+    saw_side, saw_period, saw_frac = "", 0, 0.0
+    for side, seq in (("left", left), ("right", right),
+                      ("top", top), ("bottom", bottom)):
+        period, frac = sawtooth_regularity(seq)
+        if frac > saw_frac:
+            saw_side, saw_period, saw_frac = side, period, frac
+
     return {
         "area_px": area,
         "bbox": {"width": bbox_w, "height": bbox_h},
@@ -153,6 +190,11 @@ def analyze_mask(mask):
             "right": round(1.0 - modal_fraction(right), 4),
             "top": round(1.0 - modal_fraction(top), 4),
             "bottom": round(1.0 - modal_fraction(bottom), 4),
+        },
+        "sawtooth": {
+            "side": saw_side,
+            "period_px": saw_period,
+            "match_fraction": round(saw_frac, 4),
         },
     }
 
@@ -210,11 +252,22 @@ def validate_plan(plan, errors, warnings):
     return mode
 
 
-def write_mask_preview(mask, metrics, path):
-    """Render mask (white) with bbox (red) on black for visual inspection."""
-    vis = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
-    vis[mask] = (255, 255, 255)
-    img = Image.fromarray(vis, "RGB")
+def write_mask_preview(mask, path, source=None):
+    """Render the mask with its bbox (red) for visual inspection.
+
+    Without --source: white mask on black. With --source: the protected
+    region shows the actual source pixels at full brightness and the rest
+    of the canvas shows the source dimmed, so the reviewer sees exactly
+    which content survives.
+    """
+    if source is not None:
+        src = np.asarray(source.convert("RGB"), dtype=np.float32)
+        vis = (src * 0.30).astype(np.uint8)
+        vis[mask] = src[mask].astype(np.uint8)
+    else:
+        vis = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
+        vis[mask] = (255, 255, 255)
+    img = Image.fromarray(vis)
     draw = ImageDraw.Draw(img)
     ys, xs = np.nonzero(mask)
     draw.rectangle([xs.min(), ys.min(), xs.max(), ys.max()],
@@ -229,6 +282,9 @@ def main():
     parser.add_argument("--out", required=True, help="JSON report output path")
     parser.add_argument("--mask-preview", default=None,
                         help="optional mask-preview.png output path")
+    parser.add_argument("--source", default=None,
+                        help="optional source image to overlay in the "
+                             "mask preview (must match mask dimensions)")
     args = parser.parse_args()
 
     errors, warnings = [], []
@@ -246,13 +302,28 @@ def main():
     except OSError as exc:
         print("cannot read mask: %s" % exc, file=sys.stderr)
         return 2
-    mask = np.asarray(mask_img) > 127
+    mask_arr = np.asarray(mask_img)
+    mask = mask_arr > 127
+
+    gray = int(np.logical_and(mask_arr > 0, mask_arr < 255).sum())
+    if gray:
+        warnings.append(
+            "mask contains %d anti-aliased (non-binary) pixels; preflight "
+            "binarizes at >127 but restore_and_verify pastes source alpha>0, "
+            "so the approved and restored shapes may differ - use a binary "
+            "mask derived from the source cutout alpha" % gray)
 
     metrics = {}
     if not mask.any():
         errors.append("mask is empty: no protected pixels")
     else:
         metrics = analyze_mask(mask)
+        if mode == "photo_window":
+            if metrics["rectangularity"] < PHOTO_WINDOW_RECT_MIN:
+                errors.append(
+                    "photo_window declared but mask is not rectangular "
+                    "(rectangularity=%.3f < %.2f)"
+                    % (metrics["rectangularity"], PHOTO_WINDOW_RECT_MIN))
         if mode in ORGANIC_MODES:
             limit = metrics["straight_edge_limit_px"]
             if metrics["rectangularity"] >= RECTANGULARITY_ERROR:
@@ -276,6 +347,13 @@ def main():
                         "%s contour is not broken (variation %.3f < %.2f); "
                         "long unbroken edges are forbidden"
                         % (side, frac, CONTOUR_BROKEN_MIN))
+            saw = metrics["sawtooth"]
+            if saw["match_fraction"] >= SAWTOOTH_REGULARITY_ERROR:
+                errors.append(
+                    "regular sawtooth detected on %s contour (period %d px, "
+                    "regularity %.2f >= %.2f); regular sawtooth is forbidden"
+                    % (saw["side"], saw["period_px"], saw["match_fraction"],
+                       SAWTOOTH_REGULARITY_ERROR))
 
     verified = not errors
     report = {
@@ -291,7 +369,19 @@ def main():
     print(json.dumps(report, indent=2))
 
     if args.mask_preview and metrics:
-        write_mask_preview(mask, metrics, args.mask_preview)
+        source = None
+        if args.source:
+            try:
+                source = Image.open(args.source)
+            except OSError as exc:
+                print("cannot read source for preview: %s" % exc,
+                      file=sys.stderr)
+            if source is not None and source.size != mask_img.size:
+                print("source size %r differs from mask size %r; "
+                      "preview falls back to silhouette"
+                      % (source.size, mask_img.size), file=sys.stderr)
+                source = None
+        write_mask_preview(mask, args.mask_preview, source=source)
 
     return 0 if verified else 1
 
