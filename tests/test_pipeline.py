@@ -54,6 +54,22 @@ def full_plan(mode="subject_cutout", placement=None):
             "material_continuity": "paper grain continues across transition",
             "transition_density": "sparse near subject, denser farther away",
         },
+        "atmosphere": {
+            "illustration_grammar": "field_led",
+            "illustration_field_share": 0.55,
+            "quiet_share": 0.65,
+            "edge_treatment": "torn_paper_fibrous",
+            "chromatic_accent": {
+                "hue": "clean tomato red",
+                "integration_mode": "directional_rhythm",
+                "structural_role": "route line guides the eye from summit "
+                                   "ghost down to the subject",
+            },
+            "micro_text": {
+                "text": "The long ascent",
+                "placement": "upper-left quiet paper, typewriter serif",
+            },
+        },
         "preview_review_requirements": {
             k: True for k in pf.REQUIRED_REVIEW_FIELDS},
     }
@@ -210,6 +226,46 @@ class PreflightTests(unittest.TestCase):
         fusion_errors = [e for e in report["errors"]
                          if e.startswith("fusion.")]
         self.assertEqual(len(fusion_errors), 4, report["errors"])
+
+    def test_invalid_atmosphere_rejected(self):
+        plan = full_plan()
+        plan["atmosphere"] = {
+            "illustration_grammar": "sticker_led",
+            "illustration_field_share": 0.05,  # timid peripheral doodle
+            "quiet_share": 1.5,
+            "edge_treatment": "clean_digital_cut",
+            "chromatic_accent": {"hue": "", "integration_mode": "floating",
+                                 "structural_role": ""},
+        }
+        rc, report = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc, 1)
+        atm_errors = [e for e in report["errors"]
+                      if e.startswith("atmosphere.")]
+        self.assertEqual(len(atm_errors), 8, report["errors"])
+
+    def test_micro_text_limits(self):
+        plan = full_plan()
+        plan["atmosphere"]["micro_text"] = {
+            "text": "this english line has too many words",
+            "placement": "upper-left quiet paper",
+        }
+        rc, report = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc, 1)
+        self.assertTrue(any("micro_text.text exceeds limits" in e
+                            for e in report["errors"]), report["errors"])
+        # Opting out with null is legal.
+        plan["atmosphere"]["micro_text"] = None
+        rc2, report2 = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc2, 0, report2["errors"])
+        # CJK limit: 9 Han characters is too long, 8 is fine.
+        plan["atmosphere"]["micro_text"] = {"text": "翻山越岭的漫长上升",
+                                            "placement": "left quiet paper"}
+        rc3, report3 = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc3, 1)
+        plan["atmosphere"]["micro_text"] = {"text": "漫长的上升",
+                                            "placement": "left quiet paper"}
+        rc4, report4 = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc4, 0, report4["errors"])
 
     def test_wavy_rectangle_rejected_as_visual_rectangle(self):
         rc, report = self.run_preflight(full_plan(), wavy_rect_mask())
@@ -437,6 +493,8 @@ class VisualReviewTests(unittest.TestCase):
             "rectangular_read": "pass",
             "sticker_border": "pass",
             "transition_blending": "pass",
+            "edge_tactility": "pass",
+            "micro_text_legible": "not_applicable",
             "review_notes": "transitions blend into the paper grain",
         }
         review.update(overrides)
@@ -541,6 +599,8 @@ class RunnerTests(unittest.TestCase):
                            "rectangular_read": "fail",
                            "sticker_border": "pass",
                            "transition_blending": "pass",
+                           "edge_tactility": "pass",
+                           "micro_text_legible": "not_applicable",
                            "review_notes": "still reads as a rectangle"}, fh)
             proc = run_script("run_compositor.py", "--workdir", workdir,
                               "--plan", plan, "--mask", mask,

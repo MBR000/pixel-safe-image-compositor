@@ -19,8 +19,15 @@ This script handles the post-generation side:
 
 Required review fields:
     review_image, thumbnail_image (paths relative to the review file),
-    rectangular_read, sticker_border, transition_blending ("pass"/"fail"),
+    rectangular_read, sticker_border, transition_blending,
+    edge_tactility ("pass"/"fail"),
+    micro_text_legible ("pass"/"fail"/"not_applicable"),
     review_notes (non-empty string).
+
+edge_tactility asks: does the boundary read as a tactile paper edge (torn
+fiber, fringe) rather than a clean digital cutout? micro_text_legible asks:
+is the planned micro-text correctly spelled and legible ("not_applicable"
+when the plan set micro_text to null).
 
 Exit codes: 0 = all pass, 1 = at least one fail verdict,
 2 = usage/IO/schema error.
@@ -33,9 +40,11 @@ import sys
 
 from PIL import Image
 
-VERDICT_FIELDS = ("rectangular_read", "sticker_border", "transition_blending")
+VERDICT_FIELDS = ("rectangular_read", "sticker_border",
+                  "transition_blending", "edge_tactility")
+TRI_VERDICT_FIELDS = ("micro_text_legible",)
 REQUIRED_FIELDS = ("review_image", "thumbnail_image", "review_notes") \
-    + VERDICT_FIELDS
+    + VERDICT_FIELDS + TRI_VERDICT_FIELDS
 
 
 def make_thumbnail(final_path, thumbnail_path, max_size):
@@ -61,6 +70,12 @@ def check_review(review_path):
         if f in review and review[f] not in ("pass", "fail"):
             schema_errors.append(
                 "%s must be 'pass' or 'fail', got %r" % (f, review[f]))
+    for f in TRI_VERDICT_FIELDS:
+        if f in review and review[f] not in ("pass", "fail",
+                                             "not_applicable"):
+            schema_errors.append(
+                "%s must be 'pass', 'fail', or 'not_applicable', got %r"
+                % (f, review[f]))
     notes = review.get("review_notes")
     if "review_notes" in review and (
             not isinstance(notes, str) or not notes.strip()):
@@ -78,10 +93,11 @@ def check_review(review_path):
     if schema_errors:
         return 2, {"ok": False, "errors": schema_errors}
 
-    failed = [f for f in VERDICT_FIELDS if review[f] == "fail"]
+    all_verdicts = VERDICT_FIELDS + TRI_VERDICT_FIELDS
+    failed = [f for f in all_verdicts if review[f] == "fail"]
     summary = {
         "ok": not failed,
-        "verdicts": {f: review[f] for f in VERDICT_FIELDS},
+        "verdicts": {f: review[f] for f in all_verdicts},
         "failed": failed,
         "review_notes": review["review_notes"],
     }

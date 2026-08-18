@@ -59,6 +59,7 @@ The AI must emit a JSON plan with ALL of these required fields:
 | `edge_profile` | Edge construction spec (see below) |
 | `transition` | Plan for AI-generated local transitions outside the protected edge |
 | `fusion` | Structured blending plan (see below) |
+| `atmosphere` | Editorial-collage design layer (see below) |
 | `preview_review_requirements` | Pre-generation commitments (see below) |
 
 ### edge_profile (required keys)
@@ -99,6 +100,63 @@ how the material stays continuous, and why density varies with distance.
 `source_palette_cues` and `transition_anchors` must be non-empty lists of
 strings; `material_continuity` and `transition_density` must be non-empty
 strings.
+
+### atmosphere (required keys)
+
+The design layer that separates an editorial collage from "a photo pasted
+on cream paper". Adapted from the gathered-scenes zine approach; every
+tactile treatment lives strictly OUTSIDE the protected pixels.
+
+```json
+{
+  "atmosphere": {
+    "illustration_grammar": "field_led",
+    "illustration_field_share": 0.55,
+    "quiet_share": 0.65,
+    "edge_treatment": "torn_paper_fibrous",
+    "chromatic_accent": {
+      "hue": "clean tomato red",
+      "integration_mode": "directional_rhythm",
+      "structural_role": "route line carries the eye from the ghost summit down to the subject"
+    },
+    "micro_text": {
+      "text": "The long ascent",
+      "placement": "upper-left quiet paper, typewriter serif"
+    }
+  }
+}
+```
+
+- `illustration_grammar`: one of `silhouette_led`, `contour_led`,
+  `field_led`, `rhythm_led`, `cut_paper_led`. Pick ONE primary grammar;
+  the illustration reinterprets a source element (e.g. the mountain redrawn
+  as a pale duotone ghost), it never traces the photo.
+- `illustration_field_share`: 0.25-0.80 of the canvas. A small dotted motif
+  in a corner plus two brush marks is a timid peripheral doodle, not a
+  field - preflight rejects shares below 0.25. Enlarge the field before
+  adding detail.
+- `quiet_share`: 0.45-0.90. Most of the illustration field stays unprinted;
+  blank paper is an active design element, not leftover space.
+- `edge_treatment`: `torn_paper_fibrous` (default; irregular hand-ripped
+  contour with a narrow fringe of paper fibers painted by the AI along the
+  OUTSIDE of the protected boundary), `soft_fiber_fringe`, or
+  `smooth_curve`. The tear must read as a real paper object, not a clean
+  digital cutout. The fibrous band lives entirely in the quiet buffer;
+  protected pixels are restored bit-exact regardless.
+- `chromatic_accent`: exactly ONE added high-chroma hue doing compositional
+  work. `hue` is an exact color (e.g. "clean tomato red", "opaque
+  ultramarine" - never "muted" or "pale"); `integration_mode` is one of
+  `source_continuation`, `selective_replacement`, `underprint_passage`,
+  `counterform`, `directional_rhythm`; `structural_role` must pass the
+  removal test: if deleting the hue would not change balance, eye path, or
+  figure-ground, redesign it. A detached color patch "to feel designed" is
+  forbidden.
+- `micro_text`: one quiet editorial line, or `null` to opt out explicitly.
+  `text` is at most 5 English words or 8 Han characters; `placement` names
+  a quiet-paper area outside the protected region. Render as small
+  typewriter/letterpress lettering in charcoal or brown-black; it is the
+  resting point of the eye path, never a headline. This is the ONLY
+  permitted AI-generated text.
 
 ### preview_review_requirements (required keys, all must be `true`)
 
@@ -158,13 +216,22 @@ also rejected.
 
 ## Step 3: two-stage AI generation, then programmatic restore
 
-1. Stage A: generate the paper, illustration field, and background only.
-2. Stage B: generate the detached, locally open transition shapes OUTSIDE the
-   protected region.
+1. Stage A: generate the paper, the LARGE illustration field (per
+   `atmosphere.illustration_grammar` and `illustration_field_share`), the
+   chromatic accent structure, and the background. The illustration is a
+   bold reinterpretation of a source element at meaningful scale, with
+   generous internal quiet space.
+2. Stage B: generate the detached, locally open transition shapes, the
+   torn-paper fibrous edge along the OUTSIDE of the protected boundary, and
+   the micro-text line (when planned) - all strictly outside the protected
+   region.
 3. Stage C (program, not AI): `restore_and_verify.py` pastes back the protected
    source pixels and verifies them per pixel with SHA-256.
 
 Never treat any AI output as evidence that the source pixels survived.
+The torn edge, fiber fringe, speckles, and every other tactile treatment
+are painted outside the protected pixels; the restore stage overwrites
+anything that strayed inside, so plan the tear to survive restoration.
 
 ### Prompt prohibitions (include verbatim in every generation prompt)
 
@@ -179,7 +246,10 @@ The generation prompt must explicitly forbid:
 - regular sawtooth;
 - tracing parallel to the protected outline;
 - full-image filters;
-- AI-generated text.
+- AI-generated text other than the single planned `micro_text` line;
+- timid peripheral doodles instead of a real illustration field;
+- detached decorative color patches unrelated to source geometry;
+- clean digital clipping edges where a torn-paper edge was planned.
 
 ## Scripts
 
@@ -214,6 +284,8 @@ python scripts/preflight_composition.py \
 
 Reads the plan, validates required fields, mode, `window.type`,
 `edge_profile` (all `variation_scales` must be `true`), the `fusion` plan,
+the `atmosphere` design layer (grammar enum, field/quiet shares in range,
+edge treatment, structural chromatic accent, micro-text length limits),
 and the `preview_review_requirements` checklist (all entries must be
 `true`); loads the mask, rejects empty masks, and warns on anti-aliased
 (non-binary) masks. Geometry checks: rectangularity plus the perceptual
@@ -280,10 +352,16 @@ python scripts/visual_review.py --check final-visual-review.json
   "rectangular_read": "pass",
   "sticker_border": "pass",
   "transition_blending": "fail",
+  "edge_tactility": "pass",
+  "micro_text_legible": "not_applicable",
   "review_notes": "transition shapes cluster too close to the boundary"
 }
 ```
 
+`edge_tactility` asks whether the boundary reads as a tactile paper edge
+(torn fiber, fringe) rather than a clean digital cutout.
+`micro_text_legible` asks whether the planned micro-text is correctly
+spelled and legible (`not_applicable` when `micro_text` was `null`).
 Verdicts must be `"pass"` or `"fail"` - `fail` is legal and expected when
 the render is not good enough. Any `fail` exits 1 with the instruction to
 regenerate ONLY the Stage B transition layer; the verified protected
@@ -326,8 +404,9 @@ python -m unittest discover -s tests -v
 
 It covers: a free-form mask passing preflight; rectangular masks,
 wobbly-edged "visual rectangles", long straight edges, shallow diagonals,
-and regular sawtooth rejected in organic modes; `false` checklist values
-and invalid `fusion` plans rejected; `photo_window` accepting rectangles
+and regular sawtooth rejected in organic modes; `false` checklist values,
+invalid `fusion` plans, and invalid `atmosphere` plans (bad grammar, timid
+field shares, over-length micro-text) rejected; `photo_window` accepting rectangles
 and rejecting organic masks; anti-aliased mask warnings; the source-overlay
 preview; non-integer placement rejection; the restore round-trip with zero
 mismatch; plan/manifest cross-checks; provenance fields (mask/prompt

@@ -53,6 +53,12 @@ guarantee into code:
 - Structured `fusion` plan: the AI must state where transition colors come
   from, where transitions attach, and how material continuity works - not
   just avoid forbidden artifacts
+- Structured `atmosphere` plan (editorial-collage design layer, adapted
+  from [gathered-scenes-zine by @Zeejay0](https://github.com/Zeejay0/gathered-scenes-zine-skill)):
+  one illustration grammar, a real illustration field share (timid corner
+  doodles are rejected), active negative space, a torn-paper fibrous edge
+  painted outside the protected pixels, exactly one structural high-chroma
+  hue, and an optional quiet micro-text line
 - Two-stage AI generation (background first, detached transitions second),
   then a programmatic restore stage the AI never participates in
 - Plan/manifest cross-check: the restore stage can verify that the manifest
@@ -117,9 +123,11 @@ pip install -r requirements.txt
 The AI emits `composition-plan.json` describing `focal_group`, `eye_path`,
 `keep_context` / `drop_context`, shape candidates, placement,
 `edge_profile`, transition plan, a structured `fusion` plan (palette cues,
-transition anchors, material continuity, density gradient), and the
-`preview_review_requirements` commitments. See `SKILL.md` for the full
-schema.
+transition anchors, material continuity, density gradient), a structured
+`atmosphere` plan (illustration grammar and field share, quiet share, torn
+paper edge treatment, one structural chromatic accent, optional
+micro-text), and the `preview_review_requirements` commitments. See
+`SKILL.md` for the full schema.
 
 ### 2. Build and smooth the mask
 
@@ -236,6 +244,15 @@ recorded; IO failures still write a report; visual-review schema, pass, and
 fail paths behave correctly; the unified runner passes end to end, stops on
 preflight failure, and fails on a failed review; and both `smooth_mask.py`
 modes produce binary masks that improve the geometry.
+
+## Acknowledgements
+
+The `atmosphere` design layer (torn-paper fibrous edge, illustration
+grammar and field discipline, structural chromatic accent, micro-text
+system) adapts ideas from
+[gathered-scenes-zine-skill](https://github.com/Zeejay0/gathered-scenes-zine-skill)
+by @Zeejay0, reworked to keep every tactile treatment outside the
+pixel-verified protected region.
 
 ## License
 

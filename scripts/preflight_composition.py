@@ -41,6 +41,7 @@ REQUIRED_PLAN_FIELDS = (
     "edge_profile",
     "transition",
     "fusion",
+    "atmosphere",
     "preview_review_requirements",
 )
 
@@ -49,6 +50,20 @@ REQUIRED_PLAN_FIELDS = (
 # avoid forbidden artifacts.
 REQUIRED_FUSION_LIST_FIELDS = ("source_palette_cues", "transition_anchors")
 REQUIRED_FUSION_TEXT_FIELDS = ("material_continuity", "transition_density")
+
+# Atmosphere plan: the editorial-collage design layer (adapted from the
+# gathered-scenes zine approach). All tactile treatments live OUTSIDE the
+# protected pixels.
+ILLUSTRATION_GRAMMARS = ("silhouette_led", "contour_led", "field_led",
+                         "rhythm_led", "cut_paper_led")
+EDGE_TREATMENTS = ("torn_paper_fibrous", "soft_fiber_fringe", "smooth_curve")
+CHROMA_INTEGRATION_MODES = ("source_continuation", "selective_replacement",
+                            "underprint_passage", "counterform",
+                            "directional_rhythm")
+ILLUSTRATION_FIELD_SHARE_RANGE = (0.25, 0.80)
+QUIET_SHARE_RANGE = (0.45, 0.90)
+MICRO_TEXT_MAX_EN_WORDS = 5
+MICRO_TEXT_MAX_CJK_CHARS = 8
 
 REQUIRED_EDGE_FIELDS = (
     "construction",
@@ -285,6 +300,91 @@ def analyze_mask(mask):
     }
 
 
+def micro_text_too_long(text):
+    """True when the micro-text exceeds 8 CJK chars or 5 English words."""
+    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    if cjk:
+        return cjk > MICRO_TEXT_MAX_CJK_CHARS
+    return len(text.split()) > MICRO_TEXT_MAX_EN_WORDS
+
+
+def validate_atmosphere(atm, errors):
+    """Validate the editorial-atmosphere design layer of the plan."""
+    grammar = atm.get("illustration_grammar")
+    if grammar not in ILLUSTRATION_GRAMMARS:
+        errors.append("atmosphere.illustration_grammar must be one of %s, "
+                      "got %r" % (", ".join(ILLUSTRATION_GRAMMARS), grammar))
+
+    share = atm.get("illustration_field_share")
+    lo, hi = ILLUSTRATION_FIELD_SHARE_RANGE
+    if not isinstance(share, (int, float)) or isinstance(share, bool) \
+            or not lo <= share <= hi:
+        errors.append(
+            "atmosphere.illustration_field_share must be a number in "
+            "[%.2f, %.2f] (a timid peripheral doodle is not a field), "
+            "got %r" % (lo, hi, share))
+
+    quiet = atm.get("quiet_share")
+    lo, hi = QUIET_SHARE_RANGE
+    if not isinstance(quiet, (int, float)) or isinstance(quiet, bool) \
+            or not lo <= quiet <= hi:
+        errors.append("atmosphere.quiet_share must be a number in "
+                      "[%.2f, %.2f], got %r" % (lo, hi, quiet))
+
+    edge = atm.get("edge_treatment")
+    if edge not in EDGE_TREATMENTS:
+        errors.append("atmosphere.edge_treatment must be one of %s, got %r"
+                      % (", ".join(EDGE_TREATMENTS), edge))
+
+    accent = atm.get("chromatic_accent")
+    if not isinstance(accent, dict):
+        errors.append("atmosphere.chromatic_accent must be an object with "
+                      "hue, integration_mode, structural_role")
+    else:
+        hue = accent.get("hue")
+        if not isinstance(hue, str) or not hue.strip():
+            errors.append("atmosphere.chromatic_accent.hue must be an exact, "
+                          "non-empty color description")
+        mode = accent.get("integration_mode")
+        if mode not in CHROMA_INTEGRATION_MODES:
+            errors.append(
+                "atmosphere.chromatic_accent.integration_mode must be one "
+                "of %s, got %r"
+                % (", ".join(CHROMA_INTEGRATION_MODES), mode))
+        role = accent.get("structural_role")
+        if not isinstance(role, str) or not role.strip():
+            errors.append(
+                "atmosphere.chromatic_accent.structural_role must explain "
+                "what compositional work the hue does (removal test)")
+
+    if "micro_text" not in atm:
+        errors.append("atmosphere.micro_text is required (use null to opt "
+                      "out of text explicitly)")
+    else:
+        micro = atm["micro_text"]
+        if micro is not None:
+            if not isinstance(micro, dict):
+                errors.append("atmosphere.micro_text must be null or an "
+                              "object with text and placement")
+            else:
+                text = micro.get("text")
+                if not isinstance(text, str) or not text.strip():
+                    errors.append(
+                        "atmosphere.micro_text.text must be a non-empty "
+                        "string")
+                elif micro_text_too_long(text.strip()):
+                    errors.append(
+                        "atmosphere.micro_text.text exceeds limits (max %d "
+                        "English words or %d Han characters): %r"
+                        % (MICRO_TEXT_MAX_EN_WORDS, MICRO_TEXT_MAX_CJK_CHARS,
+                           text))
+                placement = micro.get("placement")
+                if not isinstance(placement, str) or not placement.strip():
+                    errors.append(
+                        "atmosphere.micro_text.placement must name a quiet-"
+                        "paper area outside the protected region")
+
+
 def validate_plan(plan, errors, warnings):
     missing = [f for f in REQUIRED_PLAN_FIELDS if f not in plan]
     if missing:
@@ -339,6 +439,8 @@ def validate_plan(plan, errors, warnings):
         v = fusion.get(f)
         if not isinstance(v, str) or not v.strip():
             errors.append("fusion.%s must be a non-empty string" % f)
+
+    validate_atmosphere(plan.get("atmosphere") or {}, errors)
 
     review = plan.get("preview_review_requirements") or {}
     for f in REQUIRED_REVIEW_FIELDS:
