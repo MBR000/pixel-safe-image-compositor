@@ -40,8 +40,15 @@ REQUIRED_PLAN_FIELDS = (
     "window",
     "edge_profile",
     "transition",
-    "preview_review",
+    "fusion",
+    "preview_review_requirements",
 )
+
+# Fusion plan: where colors come from, where transitions attach, and how
+# material continuity works. Forces the AI to plan blending, not just
+# avoid forbidden artifacts.
+REQUIRED_FUSION_LIST_FIELDS = ("source_palette_cues", "transition_anchors")
+REQUIRED_FUSION_TEXT_FIELDS = ("material_continuity", "transition_density")
 
 REQUIRED_EDGE_FIELDS = (
     "construction",
@@ -72,6 +79,18 @@ CONTOUR_BROKEN_MIN = 0.20        # min fraction of boundary rows/cols that must 
 SAWTOOTH_REGULARITY_ERROR = 0.90  # periodic zigzag match fraction above this
 PHOTO_WINDOW_RECT_MIN = 0.98     # photo_window masks must be near-rectangular
 
+# Perceptual-rectangle gate: a shape reads as a rectangle when it is fairly
+# full, all four bbox corners are occupied, AND every side hugs the bbox
+# line on average - even if the edges wobble. All three must hold.
+VISUAL_RECT_RECTANGULARITY_MIN = 0.70
+VISUAL_RECT_CORNER_OCCUPANCY_MIN = 0.85
+VISUAL_RECT_SIDE_INSET_MAX = 0.06  # mean inset / perpendicular bbox dim
+CORNER_WINDOW_RATIO = 0.15         # corner sample window as fraction of bbox
+
+# Arbitrary-angle near-straight edge detection (tolerant chord fit).
+ANY_ANGLE_TOL_PX = 1.0
+MAX_ANY_ANGLE_RATIO = 0.15       # of the longest protected-region dimension
+
 
 def load_json(path):
     with open(path, "r", encoding="utf-8") as fh:
@@ -94,6 +113,37 @@ def longest_slope_run(seq, step):
         run = run + 1 if seq[i] - seq[i - 1] == step else 1
         best = max(best, run)
     return best if len(seq) else 0
+
+
+def longest_tolerant_line(seq, tol=ANY_ANGLE_TOL_PX):
+    """Longest near-straight segment at ANY angle, within tol px of a chord.
+
+    Catches shallow diagonals (e.g. 1 px per 4 rows) and jittered long edges
+    that evade the exact horizontal/vertical/45-degree run detectors. Binary
+    search on the segment length; a window qualifies when every point lies
+    within tol of the straight chord between its endpoints.
+    """
+    a = np.asarray(seq, dtype=float)
+    n = len(a)
+    if n < 3:
+        return n
+
+    windows = np.lib.stride_tricks.sliding_window_view
+
+    def any_window_straight(length):
+        win = windows(a, length)
+        t = np.linspace(0.0, 1.0, length)
+        chord = win[:, :1] + (win[:, -1:] - win[:, :1]) * t
+        return bool((np.abs(win - chord).max(axis=1) <= tol).any())
+
+    lo, hi = 2, n
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if any_window_straight(mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
 
 
 def modal_fraction(seq):
@@ -176,15 +226,51 @@ def analyze_mask(mask):
         if frac > saw_frac:
             saw_side, saw_period, saw_frac = side, period, frac
 
+    any_side, any_run = "", 0
+    for side, seq in (("left", left), ("right", right),
+                      ("top", top), ("bottom", bottom)):
+        run = longest_tolerant_line(seq)
+        if run > any_run:
+            any_side, any_run = side, run
+
+    x0, x1 = int(xs.min()), int(xs.max())
+    y0, y1 = int(ys.min()), int(ys.max())
+    sub = mask[y0:y1 + 1, x0:x1 + 1]
+    cw = max(2, int(round(bbox_w * CORNER_WINDOW_RATIO)))
+    ch = max(2, int(round(bbox_h * CORNER_WINDOW_RATIO)))
+    corner_occupancy = float(np.mean([
+        sub[:ch, :cw].mean(), sub[:ch, -cw:].mean(),
+        sub[-ch:, :cw].mean(), sub[-ch:, -cw:].mean(),
+    ]))
+    side_inset_ratios = {
+        "left": float(np.mean(np.asarray(left) - x0)) / bbox_w,
+        "right": float(np.mean(x1 - np.asarray(right))) / bbox_w,
+        "top": float(np.mean(np.asarray(top) - y0)) / bbox_h,
+        "bottom": float(np.mean(y1 - np.asarray(bottom))) / bbox_h,
+    }
+    max_side_inset = max(side_inset_ratios.values())
+    rectangularity = round(area / bbox_area, 4) if bbox_area else 0.0
+    visual_rectangle = bool(
+        rectangularity >= VISUAL_RECT_RECTANGULARITY_MIN
+        and corner_occupancy >= VISUAL_RECT_CORNER_OCCUPANCY_MIN
+        and max_side_inset <= VISUAL_RECT_SIDE_INSET_MAX)
+
     return {
         "area_px": area,
         "bbox": {"width": bbox_w, "height": bbox_h},
-        "rectangularity": round(area / bbox_area, 4) if bbox_area else 0.0,
+        "rectangularity": rectangularity,
+        "corner_occupancy": round(corner_occupancy, 4),
+        "side_inset_ratios": {k: round(v, 4)
+                              for k, v in side_inset_ratios.items()},
+        "max_side_inset_ratio": round(max_side_inset, 4),
+        "visual_rectangle": visual_rectangle,
         "longest_dim_px": longest_dim,
         "straight_edge_limit_px": round(MAX_STRAIGHT_EDGE_RATIO * longest_dim, 2),
         "max_straight_horizontal_px": max_h,
         "max_straight_vertical_px": max_v,
         "max_straight_diagonal_px": max_d,
+        "any_angle_limit_px": round(MAX_ANY_ANGLE_RATIO * longest_dim, 2),
+        "max_straight_any_angle_px": {"side": any_side, "run_px": any_run},
         "contour_variation": {
             "left": round(1.0 - modal_fraction(left), 4),
             "right": round(1.0 - modal_fraction(right), 4),
@@ -242,13 +328,27 @@ def validate_plan(plan, errors, warnings):
         warnings.append("quiet_buffer_px=%d is below recommended %d"
                         % (qbuf, MIN_QUIET_BUFFER_PX))
 
-    review = plan.get("preview_review") or {}
+    fusion = plan.get("fusion") or {}
+    for f in REQUIRED_FUSION_LIST_FIELDS:
+        v = fusion.get(f)
+        if (not isinstance(v, list) or not v
+                or not all(isinstance(s, str) and s.strip() for s in v)):
+            errors.append(
+                "fusion.%s must be a non-empty list of strings" % f)
+    for f in REQUIRED_FUSION_TEXT_FIELDS:
+        v = fusion.get(f)
+        if not isinstance(v, str) or not v.strip():
+            errors.append("fusion.%s must be a non-empty string" % f)
+
+    review = plan.get("preview_review_requirements") or {}
     for f in REQUIRED_REVIEW_FIELDS:
         if f not in review:
-            errors.append("preview_review missing field: %s" % f)
+            errors.append(
+                "preview_review_requirements missing field: %s" % f)
         elif review[f] is not True:
             errors.append(
-                "preview_review.%s must be true, got %r" % (f, review[f]))
+                "preview_review_requirements.%s must be true, got %r"
+                % (f, review[f]))
     return mode
 
 
@@ -334,6 +434,26 @@ def main():
             elif metrics["rectangularity"] >= RECTANGULARITY_WARN:
                 warnings.append("rectangularity=%.3f is high for an organic mode"
                                 % metrics["rectangularity"])
+            if metrics["visual_rectangle"]:
+                errors.append(
+                    "mask is visually rectangular: rectangularity=%.3f, "
+                    "corner_occupancy=%.3f >= %.2f, max_side_inset_ratio="
+                    "%.3f <= %.2f; wobbly edges on a rectangle still read "
+                    "as a rectangle"
+                    % (metrics["rectangularity"],
+                       metrics["corner_occupancy"],
+                       VISUAL_RECT_CORNER_OCCUPANCY_MIN,
+                       metrics["max_side_inset_ratio"],
+                       VISUAL_RECT_SIDE_INSET_MAX))
+            any_angle = metrics["max_straight_any_angle_px"]
+            if any_angle["run_px"] > metrics["any_angle_limit_px"]:
+                errors.append(
+                    "near-straight %s contour segment of %d px at an "
+                    "arbitrary angle (tolerance %.1f px) exceeds limit "
+                    "%.1f px (%d%% of longest dimension)"
+                    % (any_angle["side"], any_angle["run_px"],
+                       ANY_ANGLE_TOL_PX, metrics["any_angle_limit_px"],
+                       int(MAX_ANY_ANGLE_RATIO * 100)))
             for axis, key in (("horizontal", "max_straight_horizontal_px"),
                               ("vertical", "max_straight_vertical_px"),
                               ("diagonal", "max_straight_diagonal_px")):

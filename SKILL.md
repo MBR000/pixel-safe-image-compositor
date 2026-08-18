@@ -28,8 +28,16 @@ source. An AI render is never accepted as proof of source fidelity.
    to paste back the protected pixels, confirm the manifest executes the
    approved plan, and verify with SHA-256. Any mismatch yields
    `verified=false` and a non-zero exit code.
-6. Perform a final visual review against the `preview_review` checklist and
-   write `final-visual-review.json`.
+6. Evidence-based visual review: render the thumbnail with
+   `scripts/visual_review.py --final final.png --thumbnail
+   final.thumbnail.png`, inspect BOTH images, and write
+   `final-visual-review.json` with honest `pass`/`fail` verdicts (see
+   below). Validate it with `scripts/visual_review.py --check`. On any
+   `fail`, regenerate ONLY the Stage B transition layer and repeat steps
+   5-6; never regenerate the verified protected subject.
+
+`scripts/run_compositor.py` runs all programmatic stages in order and
+records per-stage status in `pipeline-status.json`.
 
 ## Step 1: composition-plan.json
 
@@ -50,7 +58,8 @@ The AI must emit a JSON plan with ALL of these required fields:
 | `window` | Window config; for `photo_window` must set `type: "rectangle_mask"` |
 | `edge_profile` | Edge construction spec (see below) |
 | `transition` | Plan for AI-generated local transitions outside the protected edge |
-| `preview_review` | Self-review checklist (see below) |
+| `fusion` | Structured blending plan (see below) |
+| `preview_review_requirements` | Pre-generation commitments (see below) |
 
 ### edge_profile (required keys)
 
@@ -69,7 +78,32 @@ The AI must emit a JSON plan with ALL of these required fields:
 - `no_sawtooth` must be `true`; `detached_transition` must be `true`.
 - `quiet_buffer_px` is the quiet paper buffer kept outside the protected edge.
 
-### preview_review (required keys, all must be checked before delivery)
+### fusion (required keys)
+
+Forces the AI to plan blending, not just avoid forbidden artifacts. It must
+answer: where the transition colors come from, where transitions attach,
+how the material stays continuous, and why density varies with distance.
+
+```json
+{
+  "fusion": {
+    "source_palette_cues": ["low-saturation blue-green mountain tones",
+                            "warm ochre from the subject"],
+    "transition_anchors": ["upper mountain ridge", "lower paper texture"],
+    "material_continuity": "paper grain continues across transition",
+    "transition_density": "sparse near subject, denser farther away"
+  }
+}
+```
+
+`source_palette_cues` and `transition_anchors` must be non-empty lists of
+strings; `material_continuity` and `transition_density` must be non-empty
+strings.
+
+### preview_review_requirements (required keys, all must be `true`)
+
+These are pre-generation COMMITMENTS, not proof. The post-generation proof
+is `final-visual-review.json` (Step 4), where `fail` is a legal verdict.
 
 - `keep_context_complete`
 - `selected_shape_readable_at_thumbnail`
@@ -87,9 +121,18 @@ The AI must emit a JSON plan with ALL of these required fields:
 For these two modes the mask edge MUST obey all of the following:
 
 - No rectangles, rounded rectangles, or regular torn edges.
+- No visually rectangular shapes: even below the hard rectangularity
+  threshold, a mask is rejected when it is fairly full
+  (rectangularity >= 0.70), all four bbox corners are occupied
+  (corner occupancy >= 0.85), and every side hugs the bbox line on average
+  (mean side inset <= 6%). Wobbly edges on a rectangle still read as a
+  rectangle.
 - No long straight horizontal, vertical, or diagonal edges.
 - No continuous straight edge longer than about 12% of the longest dimension
   of the protected region.
+- No near-straight segment at ANY angle (within 1 px of a straight chord)
+  longer than 15% of the longest dimension - shallow diagonals and jittered
+  long edges are caught too.
 - No evenly spaced spikes and no regular sawtooth.
 - The mask must be a smooth free-form curve.
 - After generation, the mask must be smoothed with curve smoothing or corner
@@ -170,17 +213,21 @@ python scripts/preflight_composition.py \
 ```
 
 Reads the plan, validates required fields, mode, `window.type`,
-`edge_profile` (all `variation_scales` must be `true`), and the
-`preview_review` checklist (all entries must be `true`); loads the mask,
-rejects empty masks, and warns on anti-aliased (non-binary) masks; computes
-rectangularity; checks that horizontal and vertical contours are broken;
-measures the longest continuous straight edge in horizontal, vertical, and
-diagonal directions; detects regular periodic sawtooth on every contour. In
-organic modes, any threshold violation exits with code 1. `photo_window`
-requires a near-rectangular mask. Writes a JSON report with `verified`,
-`errors`, `warnings`, and `mask_metrics`, and optionally renders
-`mask-preview.png` (with `--source`, the preview shows the real source
-content inside the protected region and a dimmed source outside).
+`edge_profile` (all `variation_scales` must be `true`), the `fusion` plan,
+and the `preview_review_requirements` checklist (all entries must be
+`true`); loads the mask, rejects empty masks, and warns on anti-aliased
+(non-binary) masks. Geometry checks: rectangularity plus the perceptual
+rectangle gate (corner occupancy + mean side inset); broken-contour checks;
+longest exact straight edge in horizontal, vertical, and diagonal
+directions; longest near-straight segment at any angle (1 px chord
+tolerance); regular periodic sawtooth on every contour. In organic modes,
+any threshold violation exits with code 1. `photo_window` requires a
+near-rectangular mask. Writes a JSON report with `verified`, `errors`,
+`warnings`, and `mask_metrics` (including `corner_occupancy`,
+`side_inset_ratios`, `visual_rectangle`, `max_straight_any_angle_px`), and
+optionally renders `mask-preview.png` (with `--source`, the preview shows
+the real source content inside the protected region and a dimmed source
+outside).
 
 ### Restore and verify
 
@@ -195,15 +242,66 @@ python scripts/restore_and_verify.py \
 
 The manifest points to the RGBA source cutout and its integer `placement`
 (strict integers; floats, strings, and booleans are rejected) with
-`alpha_policy: "nontransparent"`. Only non-transparent source pixels are
+`alpha_policy: "nontransparent"`. Optional provenance fields: `mask` (path;
+hashed and size-checked against the source) and `generation_prompt` or
+`generation_prompt_file` (hashed). Only non-transparent source pixels are
 pasted back. Scaling, rotation, and perspective transforms of the protected
 region are rejected. With `--plan`, the manifest `placement` and `mode` must
 match the preflight-approved plan. The script writes a PNG, re-reads it from
 disk, compares SHA-256 of the protected pixels, and returns a non-zero exit
-code with `verified=false` on any mismatch. The report also records the
-SHA-256 of the source file (and of the plan file when given) for auditing.
-Usage/IO failures (exit code 2) also write a `verified=false` report so a
-stale report can never be mistaken for a fresh result.
+code with `verified=false` on any mismatch. The report records full
+provenance: SHA-256 of the protected pixels, source file, mask file, plan
+file, and generation prompt, plus `source_size`, `mask_size`,
+`canvas_size`, and the plan's `source_crop` - so a swapped source or mask
+is detectable after the fact. Usage/IO failures (exit code 2) also write a
+`verified=false` report so a stale report can never be mistaken for a
+fresh result.
+
+### Visual review (evidence, not self-report)
+
+```bash
+# 1. render the evidence thumbnail
+python scripts/visual_review.py --final final.png \
+    --thumbnail final.thumbnail.png
+
+# 2. inspect final.png AND final.thumbnail.png, then write
+#    final-visual-review.json with honest verdicts
+
+# 3. validate
+python scripts/visual_review.py --check final-visual-review.json
+```
+
+`final-visual-review.json` required fields:
+
+```json
+{
+  "review_image": "final.png",
+  "thumbnail_image": "final.thumbnail.png",
+  "rectangular_read": "pass",
+  "sticker_border": "pass",
+  "transition_blending": "fail",
+  "review_notes": "transition shapes cluster too close to the boundary"
+}
+```
+
+Verdicts must be `"pass"` or `"fail"` - `fail` is legal and expected when
+the render is not good enough. Any `fail` exits 1 with the instruction to
+regenerate ONLY the Stage B transition layer; the verified protected
+subject must never be regenerated. Referenced evidence images must exist.
+
+### Unified runner
+
+```bash
+python scripts/run_compositor.py --workdir out \
+    --plan composition-plan.json --mask mask.png --source source.png \
+    --manifest manifest.json --ai-base final_ai_base.png \
+    [--review final-visual-review.json]
+```
+
+Runs preflight -> restore+verify -> thumbnail -> review check in order,
+stops at the first failure, and writes `pipeline-status.json` with
+per-stage exit codes. Omit `--manifest/--ai-base` for a preflight-only run
+before generation; omit `--review` to leave the visual review pending.
 
 ## Deliverables
 
@@ -212,9 +310,11 @@ All final image outputs must be PNG. Deliver together:
 - `composition-plan.json`
 - `mask-preview.png`
 - `final.png`
+- `final.thumbnail.png`
 - `composition.preflight.json`
 - `final.verification.json`
 - `final-visual-review.json`
+- `pipeline-status.json` (when using the runner)
 
 ## Minimal validation for this skill
 
@@ -224,10 +324,14 @@ Run the test suite from the repository root:
 python -m unittest discover -s tests -v
 ```
 
-It covers: a free-form mask passing preflight; rectangular masks, long
-straight edges, and regular sawtooth rejected in organic modes; `false`
-checklist values rejected; `photo_window` accepting rectangles and rejecting
-organic masks; anti-aliased mask warnings; the source-overlay preview;
-non-integer placement rejection; the restore round-trip with zero mismatch;
-plan/manifest cross-checks; report files written on IO failure; and both
-smoothing modes of `smooth_mask.py`.
+It covers: a free-form mask passing preflight; rectangular masks,
+wobbly-edged "visual rectangles", long straight edges, shallow diagonals,
+and regular sawtooth rejected in organic modes; `false` checklist values
+and invalid `fusion` plans rejected; `photo_window` accepting rectangles
+and rejecting organic masks; anti-aliased mask warnings; the source-overlay
+preview; non-integer placement rejection; the restore round-trip with zero
+mismatch; plan/manifest cross-checks; provenance fields (mask/prompt
+hashes, sizes, crop); report files written on IO failure; visual-review
+schema, pass, and fail paths; the unified runner's happy path, stop-on-
+failure, and failed-review handling; and both smoothing modes of
+`smooth_mask.py`.

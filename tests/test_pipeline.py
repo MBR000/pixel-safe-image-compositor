@@ -48,11 +48,18 @@ def full_plan(mode="subject_cutout", placement=None):
             "no_sawtooth": True,
             "detached_transition": True,
         },
-        "preview_review": {k: True for k in pf.REQUIRED_REVIEW_FIELDS},
+        "fusion": {
+            "source_palette_cues": ["warm ochre from the subject"],
+            "transition_anchors": ["upper ridge", "lower paper texture"],
+            "material_continuity": "paper grain continues across transition",
+            "transition_density": "sparse near subject, denser farther away",
+        },
+        "preview_review_requirements": {
+            k: True for k in pf.REQUIRED_REVIEW_FIELDS},
     }
 
 
-def blob_mask(size=220, radius=70):
+def blob_mask(size=300, radius=95):
     """Smooth free-form blob that satisfies all organic geometry limits."""
     yy, xx = np.mgrid[0:size, 0:size].astype(float)
     cy = cx = size / 2.0
@@ -60,7 +67,8 @@ def blob_mask(size=220, radius=70):
     rad = np.hypot(yy - cy, xx - cx)
     wobble = (1.0 + 0.22 * np.sin(3 * ang + 0.7)
               + 0.11 * np.sin(7 * ang + 1.9)
-              + 0.06 * np.sin(13 * ang + 4.2))
+              + 0.06 * np.sin(13 * ang + 4.2)
+              + 0.035 * np.sin(23 * ang + 2.2))
     return rad <= radius * wobble
 
 
@@ -86,6 +94,43 @@ def sawtooth_mask(size=240):
         x0 = 40 + 4 * tri
         x1 = 170 + int(18 * np.sin((r - 20) / 31.0))
         mask[r, x0:x1] = True
+    return mask
+
+
+def wavy_rect_mask(size=240):
+    """Rectangle with wobbly (inward-waving) edges but occupied corners.
+
+    Rectangularity lands below the 0.90 hard gate, yet the shape still
+    reads as a rectangle - the case the perceptual gate must catch.
+    """
+    mask = np.zeros((size, size), dtype=bool)
+    x0, x1, y0, y1 = 30, 210, 30, 210
+    span = y1 - y0
+    for r in range(y0, y1):
+        taper = np.sin(np.pi * (r - y0) / span)  # keeps corners occupied
+        wl = 20 * (0.5 + 0.5 * np.sin(2 * np.pi * (r - y0) / 47.0)) * taper
+        wr = 20 * (0.5 + 0.5 * np.sin(2 * np.pi * (r - y0) / 61.0 + 1.3)) \
+            * taper
+        mask[r, x0 + int(wl):x1 - int(wr)] = True
+    for c in range(x0, x1):
+        taper = np.sin(np.pi * (c - x0) / (x1 - x0))
+        wt = 20 * (0.5 + 0.5 * np.sin(2 * np.pi * (c - x0) / 53.0 + 0.5)) \
+            * taper
+        wb = 20 * (0.5 + 0.5 * np.sin(2 * np.pi * (c - x0) / 71.0 + 2.1)) \
+            * taper
+        mask[y0:y0 + int(wt), c] = False
+        mask[y1 - int(wb):y1, c] = False
+    return mask
+
+
+def shallow_diagonal_mask(size=240):
+    """Left edge is a shallow staircase (1 px per 4 rows) - a near-straight
+    line at an angle the exact H/V/45-degree detectors cannot see."""
+    mask = np.zeros((size, size), dtype=bool)
+    for r in range(20, 200):
+        xa = 30 + (r - 20) // 4
+        xb = 170 + int(14 * np.sin((r - 20) / 9.0))
+        mask[r, xa:xb] = True
     return mask
 
 
@@ -142,8 +187,8 @@ class PreflightTests(unittest.TestCase):
 
     def test_false_review_values_rejected(self):
         plan = full_plan()
-        plan["preview_review"] = {k: False
-                                  for k in pf.REQUIRED_REVIEW_FIELDS}
+        plan["preview_review_requirements"] = {
+            k: False for k in pf.REQUIRED_REVIEW_FIELDS}
         plan["edge_profile"]["variation_scales"]["medium"] = False
         rc, report = self.run_preflight(plan, blob_mask())
         self.assertEqual(rc, 1)
@@ -151,8 +196,47 @@ class PreflightTests(unittest.TestCase):
             any("variation_scales.medium must be true" in e
                 for e in report["errors"]), report["errors"])
         review_errors = [e for e in report["errors"]
-                         if e.startswith("preview_review.")]
+                         if e.startswith("preview_review_requirements.")]
         self.assertEqual(len(review_errors), len(pf.REQUIRED_REVIEW_FIELDS))
+
+    def test_invalid_fusion_rejected(self):
+        plan = full_plan()
+        plan["fusion"] = {"source_palette_cues": [],
+                          "transition_anchors": "not-a-list",
+                          "material_continuity": "",
+                          "transition_density": 3}
+        rc, report = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc, 1)
+        fusion_errors = [e for e in report["errors"]
+                         if e.startswith("fusion.")]
+        self.assertEqual(len(fusion_errors), 4, report["errors"])
+
+    def test_wavy_rectangle_rejected_as_visual_rectangle(self):
+        rc, report = self.run_preflight(full_plan(), wavy_rect_mask())
+        self.assertEqual(rc, 1)
+        metrics = report["mask_metrics"]
+        # The whole point: below the 0.90 hard threshold, yet still caught.
+        self.assertLess(metrics["rectangularity"], pf.RECTANGULARITY_ERROR)
+        self.assertTrue(metrics["visual_rectangle"], metrics)
+        self.assertTrue(any("visually rectangular" in e
+                            for e in report["errors"]), report["errors"])
+
+    def test_shallow_diagonal_rejected(self):
+        rc, report = self.run_preflight(full_plan(), shallow_diagonal_mask())
+        self.assertEqual(rc, 1)
+        self.assertTrue(any("arbitrary angle" in e
+                            for e in report["errors"]), report["errors"])
+        # The exact-slope detectors alone must NOT have caught the left edge:
+        metrics = report["mask_metrics"]
+        limit = metrics["straight_edge_limit_px"]
+        self.assertLessEqual(metrics["max_straight_vertical_px"], limit,
+                             metrics)
+
+    def test_longest_tolerant_line_unit(self):
+        shallow = [30 + i // 4 for i in range(160)]  # slope 1/4 staircase
+        self.assertGreaterEqual(pf.longest_tolerant_line(shallow), 150)
+        wave = [int(30 + 12 * np.sin(i / 5.0)) for i in range(160)]
+        self.assertLess(pf.longest_tolerant_line(wave), 40)
 
     def test_photo_window_rectangle_passes(self):
         rc, report = self.run_preflight(full_plan("photo_window"), rect_mask())
@@ -299,6 +383,190 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIsNotNone(report, "exit-2 path must write the report")
         self.assertFalse(report["verified"])
+
+    def test_provenance_fields(self):
+        with tempfile.TemporaryDirectory() as td:
+            manifest_path, base_path = self.setup_files(td)
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+            Image.new("L", (4, 4), 255).save(os.path.join(td, "mask.png"))
+            manifest["mask"] = "mask.png"
+            manifest["generation_prompt"] = "paper field, no halos"
+            with open(manifest_path, "w", encoding="utf-8") as fh:
+                json.dump(manifest, fh)
+            plan = full_plan()
+            plan["source_crop"] = {"x": 10, "y": 20, "width": 4, "height": 4}
+            plan_path = os.path.join(td, "plan.json")
+            with open(plan_path, "w", encoding="utf-8") as fh:
+                json.dump(plan, fh)
+            proc, report = self.run_restore(td, manifest_path, base_path,
+                                            extra=("--plan", plan_path))
+        self.assertEqual(proc.returncode, 0, report)
+        self.assertIn("mask_file_sha256", report)
+        self.assertEqual(report["mask_size"], [4, 4])
+        self.assertEqual(report["source_size"], [4, 4])
+        self.assertEqual(report["canvas_size"], [16, 16])
+        self.assertIn("generation_prompt_sha256", report)
+        self.assertEqual(report["plan_source_crop"]["x"], 10)
+
+    def test_mask_size_mismatch_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            manifest_path, base_path = self.setup_files(td)
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+            Image.new("L", (5, 5), 255).save(os.path.join(td, "mask.png"))
+            manifest["mask"] = "mask.png"
+            with open(manifest_path, "w", encoding="utf-8") as fh:
+                json.dump(manifest, fh)
+            proc, report = self.run_restore(td, manifest_path, base_path)
+        self.assertEqual(proc.returncode, 1)
+        self.assertTrue(any("mask size" in e for e in report["errors"]),
+                        report["errors"])
+
+
+class VisualReviewTests(unittest.TestCase):
+
+    def make_review(self, td, **overrides):
+        Image.new("RGB", (64, 64), (10, 10, 10)).save(
+            os.path.join(td, "final.png"))
+        Image.new("RGB", (16, 16), (10, 10, 10)).save(
+            os.path.join(td, "final.thumbnail.png"))
+        review = {
+            "review_image": "final.png",
+            "thumbnail_image": "final.thumbnail.png",
+            "rectangular_read": "pass",
+            "sticker_border": "pass",
+            "transition_blending": "pass",
+            "review_notes": "transitions blend into the paper grain",
+        }
+        review.update(overrides)
+        path = os.path.join(td, "final-visual-review.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(review, fh)
+        return path
+
+    def test_thumbnail_generation(self):
+        with tempfile.TemporaryDirectory() as td:
+            final = os.path.join(td, "final.png")
+            thumb = os.path.join(td, "thumb.png")
+            Image.new("RGB", (800, 600), (40, 80, 120)).save(final)
+            proc = run_script("visual_review.py", "--final", final,
+                              "--thumbnail", thumb, "--max-size", "256")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            with Image.open(thumb) as img:
+                size = img.size
+        self.assertLessEqual(max(size), 256)
+
+    def test_all_pass_review(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = self.make_review(td)
+            proc = run_script("visual_review.py", "--check", path)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_fail_verdict_is_legal_and_exits_1(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = self.make_review(td, rectangular_read="fail")
+            proc = run_script("visual_review.py", "--check", path)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("Stage B", proc.stderr)
+
+    def test_schema_violations_exit_2(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = self.make_review(td, transition_blending=True,
+                                    review_notes="")
+            proc = run_script("visual_review.py", "--check", path)
+        self.assertEqual(proc.returncode, 2)
+
+    def test_missing_evidence_image_exit_2(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = self.make_review(td, review_image="nope.png")
+            proc = run_script("visual_review.py", "--check", path)
+        self.assertEqual(proc.returncode, 2)
+
+
+class RunnerTests(unittest.TestCase):
+
+    def setup_inputs(self, td):
+        plan_path = os.path.join(td, "plan.json")
+        with open(plan_path, "w", encoding="utf-8") as fh:
+            json.dump(full_plan(), fh)
+        mask_path = os.path.join(td, "mask.png")
+        save_mask(blob_mask(), mask_path)
+        manifest_path = os.path.join(td, "manifest.json")
+        with open(manifest_path, "w", encoding="utf-8") as fh:
+            json.dump({"mode": "subject_cutout", "source": "src.png",
+                       "alpha_policy": "nontransparent",
+                       "placement": {"x": 4, "y": 4,
+                                     "width": 4, "height": 4}}, fh)
+        Image.new("RGBA", (4, 4), (255, 0, 0, 255)).save(
+            os.path.join(td, "src.png"))
+        base_path = os.path.join(td, "base.png")
+        Image.new("RGBA", (16, 16), (0, 0, 0, 255)).save(base_path)
+        return plan_path, mask_path, manifest_path, base_path
+
+    def read_status(self, workdir):
+        with open(os.path.join(workdir, "pipeline-status.json"),
+                  "r", encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_full_pipeline_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            plan, mask, manifest, base = self.setup_inputs(td)
+            workdir = os.path.join(td, "out")
+            proc = run_script("run_compositor.py", "--workdir", workdir,
+                              "--plan", plan, "--mask", mask,
+                              "--manifest", manifest, "--ai-base", base)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            status = self.read_status(workdir)
+            self.assertTrue(status["ok"])
+            done = {s["stage"]: s["ok"] for s in status["stages"]}
+            self.assertTrue(done["preflight"])
+            self.assertTrue(done["restore_and_verify"])
+            self.assertTrue(done["thumbnail"])
+            self.assertIsNone(done["visual_review"])  # pending, not run
+            for name in ("composition.preflight.json", "final.png",
+                         "final.verification.json", "final.thumbnail.png"):
+                self.assertTrue(os.path.exists(os.path.join(workdir, name)),
+                                name)
+
+    def test_failed_visual_review_fails_pipeline(self):
+        with tempfile.TemporaryDirectory() as td:
+            plan, mask, manifest, base = self.setup_inputs(td)
+            workdir = os.path.join(td, "out")
+            review_path = os.path.join(workdir, "final-visual-review.json")
+            os.makedirs(workdir)
+            with open(review_path, "w", encoding="utf-8") as fh:
+                json.dump({"review_image": "final.png",
+                           "thumbnail_image": "final.thumbnail.png",
+                           "rectangular_read": "fail",
+                           "sticker_border": "pass",
+                           "transition_blending": "pass",
+                           "review_notes": "still reads as a rectangle"}, fh)
+            proc = run_script("run_compositor.py", "--workdir", workdir,
+                              "--plan", plan, "--mask", mask,
+                              "--manifest", manifest, "--ai-base", base,
+                              "--review", review_path)
+            self.assertEqual(proc.returncode, 1)
+            status = self.read_status(workdir)
+            self.assertFalse(status["ok"])
+            done = {s["stage"]: s["ok"] for s in status["stages"]}
+            self.assertFalse(done["visual_review"])
+
+    def test_preflight_failure_stops_pipeline(self):
+        with tempfile.TemporaryDirectory() as td:
+            plan, _, manifest, base = self.setup_inputs(td)
+            bad_mask = os.path.join(td, "rect.png")
+            save_mask(rect_mask(), bad_mask)
+            workdir = os.path.join(td, "out")
+            proc = run_script("run_compositor.py", "--workdir", workdir,
+                              "--plan", plan, "--mask", bad_mask,
+                              "--manifest", manifest, "--ai-base", base)
+            self.assertEqual(proc.returncode, 1)
+            status = self.read_status(workdir)
+            stages = [s["stage"] for s in status["stages"]]
+            self.assertEqual(stages, ["preflight"])
+            self.assertFalse(os.path.exists(
+                os.path.join(workdir, "final.png")))
 
 
 class SmoothMaskTests(unittest.TestCase):

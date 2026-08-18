@@ -18,7 +18,9 @@ Manifest (paths are relative to the manifest file):
   "mode": "subject_cutout",
   "source": "./source_cutout.png",
   "placement": {"x": 120, "y": 80, "width": 640, "height": 640},
-  "alpha_policy": "nontransparent"
+  "alpha_policy": "nontransparent",
+  "mask": "./mask.png",                  // optional: hashed + size-checked
+  "generation_prompt": "..."             // optional: hashed into the report
 }
 
 Exit codes: 0 = verified, 1 = validation error or pixel mismatch,
@@ -154,6 +156,20 @@ def main():
     except OSError as exc:
         return usage_failure(args, "cannot read image: %s" % exc)
 
+    mask_abs = None
+    mask_size = None
+    if manifest.get("mask"):
+        mask_abs = os.path.join(base_dir, manifest["mask"])
+        try:
+            with Image.open(mask_abs) as mask_img:
+                mask_size = list(mask_img.size)
+        except OSError as exc:
+            return usage_failure(args, "cannot read mask: %s" % exc)
+        if tuple(mask_size) != src.size:
+            errors.append(
+                "mask size %r differs from source size %r; the mask must "
+                "describe the source cutout" % (tuple(mask_size), src.size))
+
     sw, sh = src.size
     if (pw, ph) != (sw, sh):
         errors.append(
@@ -201,10 +217,28 @@ def main():
         "sha256_expected": expected,
         "sha256_actual": actual,
         "source_file_sha256": sha256_of_file(source_abs),
+        "source_size": [sw, sh],
+        "canvas_size": [bw, bh],
         "errors": errors,
     }
+    if mask_abs is not None:
+        result["mask_file_sha256"] = sha256_of_file(mask_abs)
+        result["mask_size"] = mask_size
+    prompt = manifest.get("generation_prompt")
+    if isinstance(prompt, str) and prompt:
+        result["generation_prompt_sha256"] = hashlib.sha256(
+            prompt.encode("utf-8")).hexdigest()
+    elif manifest.get("generation_prompt_file"):
+        prompt_abs = os.path.join(base_dir, manifest["generation_prompt_file"])
+        try:
+            result["generation_prompt_sha256"] = sha256_of_file(prompt_abs)
+        except OSError as exc:
+            errors.append("cannot hash generation prompt file: %s" % exc)
+            result["verified"] = False
     if args.plan:
         result["plan_file_sha256"] = sha256_of_file(args.plan)
+        if isinstance(plan.get("source_crop"), dict):
+            result["plan_source_crop"] = plan["source_crop"]
     return finish(args, result, errors)
 
 
