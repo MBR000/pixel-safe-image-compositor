@@ -26,7 +26,10 @@ SHA-256 校验。AI 渲染结果永远不会被当作源图保真的证明。
 
 ## 功能特性
 
-- 三种合成模式：
+- 四种合成模式：
+  - `photo_echo`——zine 版式：照片满幅出血贴到画布边缘，只有一条沿内容线
+    （地平线、山脊）走的有机撕缝，缝外的插画层重绘照片自身的元素——
+    "纸上撕开一个连续世界"的最强读感
   - `subject_cutout`——干净抠图主体置于设计好的画面场域中
   - `organic_context`——主体融入有机插画场景
   - `photo_window`——显式的矩形照片窗口（唯一允许矩形 mask 的模式）
@@ -42,13 +45,19 @@ SHA-256 校验。AI 渲染结果永远不会被当作源图保真的证明。
   - 受保护边缘外必须有安静的纸面缓冲区
   - AI 过渡形状必须是分离的、局部开放的形状——绝不允许闭合描边或
     平行于剪影的环带
+- `photo_echo` 几何门禁：mask 必须覆盖画布周长的 25% 以上（真正的满幅出血）；
+  贴在画布边缘上的边界段豁免直线检测，而内部撕缝必须通过全部有机门禁
+  （无直线 / 近直线长段、无规则锯齿、有真实变化），且计划声明的
+  `seam.side` 必须是内部边界
 - 结构化 `fusion`（融合）计划：AI 必须说明过渡颜色来自哪里、过渡接在哪些
   局部、材质如何连续——而不仅仅是避开禁止的伪影
 - 结构化 `atmosphere`（氛围）计划（编辑拼贴设计层，改编自
   [gathered-scenes-zine by @Zeejay0](https://github.com/Zeejay0/gathered-scenes-zine-skill)）：
-  单一插画语法、真实的插画场域占比（畏缩的角落涂鸦会被拒绝）、有张力的留白、
-  绘制在受保护像素之外的撕纸纤维边缘、恰好一种结构性高饱和色，以及可选的
-  一行安静微型文字（micro-text）
+  单一插画语法、强制的 `photo_echo_subjects`（插画层必须重绘照片中的具体
+  元素——与照片无关的通用涂鸦会被拒绝）、真实的插画场域占比、有张力的留白
+  加强制的 `quiet_texture`（留白是水彩渍 / 网点颗粒 / 纸纤维，绝不是空白
+  纸面）、绘制在受保护像素之外的撕纸纤维边缘、恰好一种结构性高饱和色，
+  以及可选的一行安静微型文字（micro-text）
 - 两阶段 AI 生成（先背景，再分离式过渡），最后是 AI 完全不参与的程序化恢复阶段
 - 计划 / 清单交叉校验：恢复阶段可以验证 manifest 执行的正是预检通过的
   计划（`--plan`）
@@ -130,9 +139,11 @@ pip install -r requirements.txt
 AI 输出 `composition-plan.json`，描述 `focal_group`、`eye_path`、
 `keep_context` / `drop_context`、候选形状、放置位置、`edge_profile`、
 过渡计划、结构化 `fusion` 计划（色彩来源线索、过渡锚点、材质连续性、
-密度梯度）、结构化 `atmosphere` 计划（插画语法与场域占比、留白占比、
-撕纸边缘处理、单一结构性色彩强调、可选微型文字），以及
-`preview_review_requirements` 承诺项。完整 schema 见 `SKILL.md`。
+密度梯度）、结构化 `atmosphere` 计划（插画语法、插画层要重绘的具体
+`photo_echo_subjects`、场域与留白占比、`quiet_texture`、撕纸边缘处理、
+单一结构性色彩强调、可选微型文字）、`preview_review_requirements`
+承诺项，以及——在 `photo_echo` 模式下——把撕缝锚定到照片内容线的
+`seam` 声明。完整 schema 见 `SKILL.md`。
 
 ### 2. 构建并平滑 mask
 
@@ -158,17 +169,20 @@ python scripts/preflight_composition.py \
 
 退出码 1 表示必须先修正计划或 mask，再进行任何生成。矩形 mask 会被拒绝，
 除非计划显式声明 `mode: photo_window` 且 `window.type: rectangle_mask`
-（并且声明为 `photo_window` 的 mask 必须真的是矩形）。加上 `--source` 后，
-mask 预览图会在受保护区域内显示真实的源图内容。
+（并且声明为 `photo_window` 的 mask 必须真的是矩形）。`photo_echo` 的
+mask 必须真正满幅出血且内部撕缝为有机曲线。加上 `--source` 后，mask
+预览图会在受保护区域内显示真实的源图内容。
 
 ### 4. AI 生成（两个阶段）
 
-- Stage A：仅纸面、插画场域、背景
+- Stage A：仅纸面、插画场域、背景。插画必须重绘计划中的
+  `photo_echo_subjects`；`photo_echo` 模式下场景要跨缝延续；留白区域
+  按计划的 `quiet_texture` 铺设材质
 - Stage B：受保护区域之外的分离式、局部开放的过渡形状
 
 每个 prompt 都必须禁止：重绘受保护区域、新增人物或动物、贴纸描边、
 连续勾线、均匀光晕、长直边、规则锯齿、平行于受保护轮廓的描摹、
-全图滤镜，以及 AI 生成的文字。
+全图滤镜、AI 生成的文字、与照片无关的插画内容，以及空白无材质的留白。
 
 ### 5. 恢复并校验
 
@@ -224,7 +238,7 @@ python scripts/run_compositor.py --workdir out \
 
 ## 验证
 
-本 skill 附带对其保证的完整测试（32 个测试）：
+本 skill 附带对其保证的完整测试（40 个测试）：
 
 ```bash
 pip install -r requirements.txt
@@ -232,13 +246,16 @@ python -m unittest discover -s tests -v
 ```
 
 覆盖内容：自由曲线 mask 通过预检；矩形、边缘抖动的"视觉矩形"、长直边、
-浅斜线和规则锯齿在有机模式下被拒绝；`false` 检查项和无效 `fusion` 计划
-被拒绝；`photo_window` 接受矩形并拒绝有机 mask；抗锯齿 mask 触发警告；
-源图叠加预览渲染正确；非整数放置坐标被拒绝；恢复往返校验零像素不匹配；
-计划 / 清单交叉校验能捕捉分歧；来源追踪字段（mask / prompt 哈希、尺寸、
-裁剪）被正确记录；IO 失败仍会写出报告；视觉复检的 schema、pass 和 fail
-路径行为正确；统一执行器端到端通过、预检失败即停止、复检失败即失败；
-`smooth_mask.py` 两种模式都产出改善几何形状的二值 mask。
+浅斜线和规则锯齿在有机模式下被拒绝；`false` 检查项、无效 `fusion` 计划、
+缺失的 `photo_echo_subjects` / `quiet_texture` 被拒绝；`photo_window`
+接受矩形并拒绝有机 mask；`photo_echo` 接受带撕缝的满幅出血 mask，并拒绝
+直线撕缝、悬浮形状和缺失的 seam / window 声明——同一张满幅 mask 在有机
+模式下仍会失败；抗锯齿 mask 触发警告；源图叠加预览渲染正确；非整数放置
+坐标被拒绝；恢复往返校验零像素不匹配；计划 / 清单交叉校验能捕捉分歧；
+来源追踪字段（mask / prompt 哈希、尺寸、裁剪）被正确记录；IO 失败仍会
+写出报告；视觉复检的 schema、pass 和 fail 路径行为正确；统一执行器端到端
+通过、预检失败即停止、复检失败即失败；`smooth_mask.py` 两种模式都产出
+改善几何形状的二值 mask。
 
 ## 安全性
 
@@ -260,7 +277,7 @@ python -m unittest discover -s tests -v
 ## 致谢
 
 `atmosphere` 设计层（撕纸纤维边缘、插画语法与场域纪律、结构性色彩强调、
-微型文字系统）改编自 @Zeejay0 的
+微型文字系统）与 `photo_echo` 版式改编自 @Zeejay0 的
 [gathered-scenes-zine-skill](https://github.com/Zeejay0/gathered-scenes-zine-skill)，
 并重新设计为所有质感处理都保持在像素校验的受保护区域之外。
 

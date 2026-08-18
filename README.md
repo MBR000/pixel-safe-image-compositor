@@ -32,7 +32,11 @@ guarantee into code:
 
 ## Features
 
-- Three composition modes:
+- Four composition modes:
+  - `photo_echo` — the zine layout: the photo runs full-bleed to the canvas
+    edges, one organic torn seam follows a content line (horizon, ridge),
+    and the illustrated layer beyond the seam redraws the photo's own
+    subjects — the strongest "one continuous world on paper" read
   - `subject_cutout` — clean cutout subject on a designed field
   - `organic_context` — subject blended into an organic illustrated scene
   - `photo_window` — explicit rectangular photo window (the only mode where
@@ -52,13 +56,22 @@ guarantee into code:
   - quiet paper buffer outside the protected edge
   - AI transitions must be detached, locally open shapes — never a closed
     outline or a parallel band tracing the silhouette
+- `photo_echo` geometry gates: the mask must cover >= 25% of the canvas
+  perimeter (genuine full-bleed); boundary segments on the canvas border
+  are exempt from straightness checks, while the interior torn seam must
+  still pass every organic gate (no straight or near-straight runs, no
+  regular sawtooth, real variation) and the declared `seam.side` must be
+  an interior boundary
 - Structured `fusion` plan: the AI must state where transition colors come
   from, where transitions attach, and how material continuity works - not
   just avoid forbidden artifacts
 - Structured `atmosphere` plan (editorial-collage design layer, adapted
   from [gathered-scenes-zine by @Zeejay0](https://github.com/Zeejay0/gathered-scenes-zine-skill)):
-  one illustration grammar, a real illustration field share (timid corner
-  doodles are rejected), active negative space, a torn-paper fibrous edge
+  one illustration grammar, mandatory `photo_echo_subjects` (the
+  illustration must redraw concrete elements of the photo — generic
+  doodles are rejected), a real illustration field share, active negative
+  space with a mandatory `quiet_texture` (quiet zones are washes / halftone
+  grain / paper fiber, never blank paper), a torn-paper fibrous edge
   painted outside the protected pixels, exactly one structural high-chroma
   hue, and an optional quiet micro-text line
 - Two-stage AI generation (background first, detached transitions second),
@@ -146,10 +159,12 @@ The AI emits `composition-plan.json` describing `focal_group`, `eye_path`,
 `keep_context` / `drop_context`, shape candidates, placement,
 `edge_profile`, transition plan, a structured `fusion` plan (palette cues,
 transition anchors, material continuity, density gradient), a structured
-`atmosphere` plan (illustration grammar and field share, quiet share, torn
+`atmosphere` plan (illustration grammar, the concrete `photo_echo_subjects`
+the illustration redraws, field and quiet shares, `quiet_texture`, torn
 paper edge treatment, one structural chromatic accent, optional
-micro-text), and the `preview_review_requirements` commitments. See
-`SKILL.md` for the full schema.
+micro-text), the `preview_review_requirements` commitments, and — in
+`photo_echo` mode — a `seam` declaration anchoring the tear to a content
+line of the photo. See `SKILL.md` for the full schema.
 
 ### 2. Build and smooth the mask
 
@@ -176,19 +191,24 @@ python scripts/preflight_composition.py \
 Exit code 1 means fix the plan or mask before generating anything.
 Rectangular masks are rejected unless the plan explicitly declares
 `mode: photo_window` and `window.type: rectangle_mask` (and a declared
-`photo_window` must actually be rectangular). With `--source`, the mask
-preview shows the real source content inside the protected region.
+`photo_window` must actually be rectangular). `photo_echo` masks must be
+genuinely full-bleed with an organic interior seam. With `--source`, the
+mask preview shows the real source content inside the protected region.
 
 ### 4. Generate with the AI (two stages)
 
-- Stage A: paper, illustration field, background only
+- Stage A: paper, illustration field, background only. The illustration
+  redraws the planned `photo_echo_subjects`; in `photo_echo` mode the
+  scene continues across the seam; quiet zones are laid in with the
+  planned `quiet_texture`
 - Stage B: detached, locally open transition shapes outside the protected
   region
 
 Every prompt must forbid: repainting the protected region, new people or
 animals, sticker borders, continuous outlining, uniform halos, long straight
 edges, regular sawtooth, tracing parallel to the protected outline,
-full-image filters, and AI-generated text.
+full-image filters, AI-generated text, illustration content unrelated to
+the photo, and blank untextured quiet zones.
 
 ### 5. Restore and verify
 
@@ -247,7 +267,7 @@ All image outputs are PNG.
 
 ## Validation
 
-This skill ships with its guarantees tested (32 tests):
+This skill ships with its guarantees tested (40 tests):
 
 ```bash
 pip install -r requirements.txt
@@ -256,16 +276,20 @@ python -m unittest discover -s tests -v
 
 Covered: free-form masks pass preflight; rectangles, wobbly-edged "visual
 rectangles", long straight edges, shallow diagonals, and regular sawtooth
-are rejected in organic modes; `false` checklist values and invalid
-`fusion` plans are rejected; `photo_window` accepts rectangles and rejects
-organic masks; anti-aliased masks trigger a warning; the source-overlay
-preview renders correctly; non-integer placement is rejected; the restore
-round-trip verifies with zero mismatched pixels; plan/manifest cross-checks
-catch divergence; provenance fields (mask/prompt hashes, sizes, crop) are
-recorded; IO failures still write a report; visual-review schema, pass, and
-fail paths behave correctly; the unified runner passes end to end, stops on
-preflight failure, and fails on a failed review; and both `smooth_mask.py`
-modes produce binary masks that improve the geometry.
+are rejected in organic modes; `false` checklist values, invalid `fusion`
+plans, and missing `photo_echo_subjects`/`quiet_texture` are rejected;
+`photo_window` accepts rectangles and rejects organic masks; `photo_echo`
+accepts a full-bleed mask with a torn seam and rejects straight seams,
+floating masks, and missing seam/window declarations — while the same
+full-bleed mask still fails organic modes; anti-aliased masks trigger a
+warning; the source-overlay preview renders correctly; non-integer
+placement is rejected; the restore round-trip verifies with zero mismatched
+pixels; plan/manifest cross-checks catch divergence; provenance fields
+(mask/prompt hashes, sizes, crop) are recorded; IO failures still write a
+report; visual-review schema, pass, and fail paths behave correctly; the
+unified runner passes end to end, stops on preflight failure, and fails on
+a failed review; and both `smooth_mask.py` modes produce binary masks that
+improve the geometry.
 
 ## Security
 
@@ -290,7 +314,7 @@ them:
 
 The `atmosphere` design layer (torn-paper fibrous edge, illustration
 grammar and field discipline, structural chromatic accent, micro-text
-system) adapts ideas from
+system) and the `photo_echo` layout adapt ideas from
 [gathered-scenes-zine-skill](https://github.com/Zeejay0/gathered-scenes-zine-skill)
 by @Zeejay0, reworked to keep every tactile treatment outside the
 pixel-verified protected region.
