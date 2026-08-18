@@ -26,7 +26,7 @@ import smooth_mask as sm  # noqa: E402
 
 
 def full_plan(mode="subject_cutout", placement=None):
-    return {
+    plan = {
         "mode": mode,
         "focal_group": "subject",
         "eye_path": "top-left to bottom-right",
@@ -38,6 +38,7 @@ def full_plan(mode="subject_cutout", placement=None):
         "placement": placement or {"x": 4, "y": 4, "width": 4, "height": 4},
         "layout_budget": {},
         "window": ({"type": "rectangle_mask"} if mode == "photo_window"
+                   else {"type": "torn_seam"} if mode == "photo_echo"
                    else {}),
         "transition": {},
         "edge_profile": {
@@ -56,8 +57,10 @@ def full_plan(mode="subject_cutout", placement=None):
         },
         "atmosphere": {
             "illustration_grammar": "field_led",
+            "photo_echo_subjects": ["rider silhouette", "lake horizon"],
             "illustration_field_share": 0.55,
             "quiet_share": 0.65,
+            "quiet_texture": "pale wash over visible paper grain",
             "edge_treatment": "torn_paper_fibrous",
             "chromatic_accent": {
                 "hue": "clean tomato red",
@@ -73,6 +76,9 @@ def full_plan(mode="subject_cutout", placement=None):
         "preview_review_requirements": {
             k: True for k in pf.REQUIRED_REVIEW_FIELDS},
     }
+    if mode == "photo_echo":
+        plan["seam"] = {"anchor": "lake horizon", "side": "top"}
+    return plan
 
 
 def blob_mask(size=300, radius=95):
@@ -147,6 +153,25 @@ def shallow_diagonal_mask(size=240):
         xa = 30 + (r - 20) // 4
         xb = 170 + int(14 * np.sin((r - 20) / 9.0))
         mask[r, xa:xb] = True
+    return mask
+
+
+def photo_echo_mask(size=400, straight=False):
+    """Bottom region runs full-bleed to the left/right/bottom canvas edges;
+    the top boundary is an organic torn seam (or a flat seam when
+    straight=True). Models the zine layout: photo below, paper above."""
+    mask = np.zeros((size, size), dtype=bool)
+    xs = np.arange(size)
+    if straight:
+        seam = np.full(size, size // 2)
+    else:
+        env = np.sin(np.pi * xs / (size - 1))  # 0 at both canvas edges
+        seam = (190 + 40 * env
+                + env * (12 * np.sin(2 * np.pi * xs / 53.0 + 1.3)
+                         + 5 * np.sin(2 * np.pi * xs / 19.0 + 0.4))
+                ).astype(int)
+    for c in range(size):
+        mask[seam[c]:, c] = True
     return mask
 
 
@@ -241,7 +266,21 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         atm_errors = [e for e in report["errors"]
                       if e.startswith("atmosphere.")]
-        self.assertEqual(len(atm_errors), 8, report["errors"])
+        # grammar, photo_echo_subjects, field share, quiet share,
+        # quiet_texture, edge treatment, hue, integration mode,
+        # structural role, missing micro_text
+        self.assertEqual(len(atm_errors), 10, report["errors"])
+
+    def test_missing_echo_subjects_and_quiet_texture_rejected(self):
+        plan = full_plan()
+        del plan["atmosphere"]["photo_echo_subjects"]
+        del plan["atmosphere"]["quiet_texture"]
+        rc, report = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc, 1)
+        self.assertTrue(any("photo_echo_subjects" in e
+                            for e in report["errors"]), report["errors"])
+        self.assertTrue(any("quiet_texture" in e for e in report["errors"]),
+                        report["errors"])
 
     def test_micro_text_limits(self):
         plan = full_plan()
@@ -303,6 +342,53 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertTrue(any("not rectangular" in e for e in report["errors"]),
                         report["errors"])
+
+    def test_photo_echo_torn_seam_passes(self):
+        rc, report = self.run_preflight(full_plan("photo_echo"),
+                                        photo_echo_mask())
+        self.assertEqual(rc, 0, report["errors"])
+        echo = report["mask_metrics"]["photo_echo"]
+        self.assertEqual(echo["seam_sides"], ["top"])
+        self.assertGreaterEqual(echo["border_bleed_fraction"],
+                                pf.BORDER_BLEED_MIN_FRACTION)
+
+    def test_photo_echo_straight_seam_rejected(self):
+        rc, report = self.run_preflight(full_plan("photo_echo"),
+                                        photo_echo_mask(straight=True))
+        self.assertEqual(rc, 1)
+        self.assertTrue(any("seam" in e and "straight" in e
+                            for e in report["errors"]), report["errors"])
+
+    def test_photo_echo_floating_mask_rejected(self):
+        rc, report = self.run_preflight(full_plan("photo_echo"), blob_mask())
+        self.assertEqual(rc, 1)
+        self.assertTrue(any("full-bleed" in e for e in report["errors"]),
+                        report["errors"])
+
+    def test_full_bleed_mask_rejected_in_organic_mode(self):
+        # The border exemption exists ONLY in photo_echo; the same mask in
+        # an organic mode must still fail on its straight border edges.
+        rc, report = self.run_preflight(full_plan(), photo_echo_mask())
+        self.assertEqual(rc, 1)
+        self.assertTrue(report["errors"])
+
+    def test_photo_echo_plan_requirements(self):
+        plan = full_plan("photo_echo")
+        del plan["seam"]
+        plan["window"] = {}
+        rc, report = self.run_preflight(plan, photo_echo_mask())
+        self.assertEqual(rc, 1)
+        self.assertTrue(any("window.type=torn_seam" in e
+                            for e in report["errors"]), report["errors"])
+        self.assertTrue(any("seam object" in e for e in report["errors"]),
+                        report["errors"])
+        # torn_seam window is exclusive to photo_echo.
+        plan2 = full_plan()
+        plan2["window"] = {"type": "torn_seam"}
+        rc2, report2 = self.run_preflight(plan2, blob_mask())
+        self.assertEqual(rc2, 1)
+        self.assertTrue(any("only allowed with mode=photo_echo" in e
+                            for e in report2["errors"]), report2["errors"])
 
     def test_antialiased_mask_warns(self):
         mask = rect_mask()

@@ -4,7 +4,8 @@
 Validates composition-plan.json and the protected-region mask BEFORE any AI
 generation. Organic modes (subject_cutout, organic_context) are rejected with
 exit code 1 when the mask contains forbidden geometry: rectangles, unbroken
-contours, or long straight edges.
+contours, or long straight edges. photo_echo masks must run full-bleed to the
+canvas edges with a single organic torn seam.
 
 Usage:
     python preflight_composition.py \
@@ -23,8 +24,9 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw
 
-MODES = ("subject_cutout", "organic_context", "photo_window")
+MODES = ("subject_cutout", "organic_context", "photo_window", "photo_echo")
 ORGANIC_MODES = ("subject_cutout", "organic_context")
+SEAM_SIDES = ("left", "right", "top", "bottom")
 
 REQUIRED_PLAN_FIELDS = (
     "mode",
@@ -105,6 +107,16 @@ CORNER_WINDOW_RATIO = 0.15         # corner sample window as fraction of bbox
 # Arbitrary-angle near-straight edge detection (tolerant chord fit).
 ANY_ANGLE_TOL_PX = 1.0
 MAX_ANY_ANGLE_RATIO = 0.15       # of the longest protected-region dimension
+
+# photo_echo: the protected photo runs full-bleed to canvas edges and the
+# remaining boundary is a single organic torn seam along a content line.
+# Boundary segments that hug the canvas border are exempt from straightness
+# checks; the interior seam must still read as a hand-torn edge.
+BORDER_HUG_TOL_PX = 1
+BORDER_SIDE_MIN_FRACTION = 0.90   # side reported as full-bleed above this
+BORDER_BLEED_MIN_FRACTION = 0.25  # min fraction of canvas perimeter covered
+SEAM_SEGMENT_MIN_PX = 16          # ignore tiny interior slivers
+SEAM_VARIATION_MIN_PX = 48        # variation check needs a real seam length
 
 
 def load_json(path):
@@ -300,6 +312,131 @@ def analyze_mask(mask):
     }
 
 
+def border_nearness(side, seq, shape):
+    """Boolean array: which boundary entries hug the canvas border."""
+    h, w = shape
+    a = np.asarray(seq)
+    if side in ("left", "top"):
+        return a <= BORDER_HUG_TOL_PX
+    if side == "right":
+        return a >= w - 1 - BORDER_HUG_TOL_PX
+    return a >= h - 1 - BORDER_HUG_TOL_PX  # bottom
+
+
+def interior_segments(seq, near_border):
+    """Split a boundary sequence into contiguous non-border (seam) segments."""
+    segments, current = [], []
+    for value, near in zip(seq, near_border):
+        if near:
+            if current:
+                segments.append(current)
+                current = []
+        else:
+            current.append(value)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def check_photo_echo(mask, metrics, seam_plan, errors):
+    """Validate photo_echo geometry: full-bleed borders + one organic seam.
+
+    Boundary entries lying on the canvas border are exempt from all
+    straightness checks - that is the point of full-bleed. Every interior
+    boundary segment (the torn seam) must read as a hand-torn edge: no long
+    straight or near-straight runs, no regular sawtooth, real variation.
+    """
+    h, w = mask.shape
+    perimeter = 2 * (h + w)
+    bleed = float(mask[0, :].sum() + mask[-1, :].sum()
+                  + mask[:, 0].sum() + mask[:, -1].sum()) / perimeter
+
+    left, right, top, bottom = boundary_sequences(mask)
+    sides = {"left": left, "right": right, "top": top, "bottom": bottom}
+
+    hug, seam_sides = {}, []
+    for side, seq in sides.items():
+        near = border_nearness(side, seq, mask.shape)
+        frac = float(near.mean()) if len(seq) else 0.0
+        hug[side] = round(frac, 4)
+        if frac < BORDER_SIDE_MIN_FRACTION:
+            seam_sides.append(side)
+
+    if bleed < BORDER_BLEED_MIN_FRACTION:
+        errors.append(
+            "photo_echo requires the protected photo to run full-bleed to "
+            "the canvas edges (only %.0f%% of the canvas perimeter is "
+            "covered, need >= %.0f%%); for a floating shape use an organic "
+            "mode instead" % (bleed * 100, BORDER_BLEED_MIN_FRACTION * 100))
+    if not seam_sides:
+        errors.append(
+            "photo_echo mask is full-bleed on all four canvas edges; no "
+            "torn seam remains for the illustration layer")
+
+    declared = seam_plan.get("side")
+    if declared in sides and declared not in seam_sides:
+        errors.append(
+            "plan declares seam.side=%r but that boundary hugs the canvas "
+            "border (hug fraction %.2f); the torn seam must be an interior "
+            "boundary" % (declared, hug.get(declared, 0.0)))
+
+    limit = metrics["straight_edge_limit_px"]
+    any_limit = metrics["any_angle_limit_px"]
+    seam_metrics = {}
+    for side, seq in sides.items():
+        near = border_nearness(side, seq, mask.shape)
+        segments = [s for s in interior_segments(seq, near)
+                    if len(s) >= SEAM_SEGMENT_MIN_PX]
+        if not segments:
+            continue
+        max_straight = max_any = 0
+        saw_frac = 0.0
+        interior_vals = []
+        for seg in segments:
+            max_straight = max(max_straight, longest_constant_run(seg),
+                               longest_slope_run(seg, 1),
+                               longest_slope_run(seg, -1))
+            max_any = max(max_any, longest_tolerant_line(seg))
+            saw_frac = max(saw_frac, sawtooth_regularity(seg)[1])
+            interior_vals.extend(seg)
+        variation = round(1.0 - modal_fraction(interior_vals), 4)
+        seam_metrics[side] = {
+            "seam_px": len(interior_vals),
+            "max_straight_px": max_straight,
+            "max_any_angle_px": max_any,
+            "sawtooth_match_fraction": round(saw_frac, 4),
+            "variation": variation,
+        }
+        if max_straight > limit:
+            errors.append(
+                "photo_echo seam on %s side has a straight run of %d px "
+                "exceeding limit %.1f px; the tear must be an organic curve"
+                % (side, max_straight, limit))
+        if max_any > any_limit:
+            errors.append(
+                "photo_echo seam on %s side has a near-straight segment of "
+                "%d px (tolerance %.1f px) exceeding limit %.1f px"
+                % (side, max_any, ANY_ANGLE_TOL_PX, any_limit))
+        if saw_frac >= SAWTOOTH_REGULARITY_ERROR:
+            errors.append(
+                "photo_echo seam on %s side is a regular sawtooth "
+                "(regularity %.2f >= %.2f); regular tears are forbidden"
+                % (side, saw_frac, SAWTOOTH_REGULARITY_ERROR))
+        if (len(interior_vals) >= SEAM_VARIATION_MIN_PX
+                and variation < CONTOUR_BROKEN_MIN):
+            errors.append(
+                "photo_echo seam on %s side barely varies (variation %.3f "
+                "< %.2f); a flat seam is not a torn edge"
+                % (side, variation, CONTOUR_BROKEN_MIN))
+
+    return {
+        "border_bleed_fraction": round(bleed, 4),
+        "edge_hug": hug,
+        "seam_sides": sorted(seam_sides),
+        "seams": seam_metrics,
+    }
+
+
 def micro_text_too_long(text):
     """True when the micro-text exceeds 8 CJK chars or 5 English words."""
     cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
@@ -314,6 +451,15 @@ def validate_atmosphere(atm, errors):
     if grammar not in ILLUSTRATION_GRAMMARS:
         errors.append("atmosphere.illustration_grammar must be one of %s, "
                       "got %r" % (", ".join(ILLUSTRATION_GRAMMARS), grammar))
+
+    subjects = atm.get("photo_echo_subjects")
+    if (not isinstance(subjects, list) or not subjects
+            or not all(isinstance(s, str) and s.strip() for s in subjects)):
+        errors.append(
+            "atmosphere.photo_echo_subjects must be a non-empty list of "
+            "concrete photo elements the illustration layer redraws (e.g. "
+            "'rider silhouette', 'lake horizon'); generic doodles unrelated "
+            "to the photo are forbidden")
 
     share = atm.get("illustration_field_share")
     lo, hi = ILLUSTRATION_FIELD_SHARE_RANGE
@@ -330,6 +476,13 @@ def validate_atmosphere(atm, errors):
             or not lo <= quiet <= hi:
         errors.append("atmosphere.quiet_share must be a number in "
                       "[%.2f, %.2f], got %r" % (lo, hi, quiet))
+
+    texture = atm.get("quiet_texture")
+    if not isinstance(texture, str) or not texture.strip():
+        errors.append(
+            "atmosphere.quiet_texture must describe the low-contrast "
+            "material of the quiet zones (washes, halftone grain, paper "
+            "fiber); quiet space is textured material, not blank paper")
 
     edge = atm.get("edge_treatment")
     if edge not in EDGE_TREATMENTS:
@@ -404,6 +557,29 @@ def validate_plan(plan, errors, warnings):
     elif wtype == "rectangle_mask":
         errors.append(
             "window.type=rectangle_mask is only allowed with mode=photo_window")
+    if mode == "photo_echo":
+        if wtype != "torn_seam":
+            errors.append(
+                "photo_echo requires window.type=torn_seam, got %r" % wtype)
+    elif wtype == "torn_seam":
+        errors.append(
+            "window.type=torn_seam is only allowed with mode=photo_echo")
+
+    if mode == "photo_echo":
+        seam = plan.get("seam")
+        if not isinstance(seam, dict):
+            errors.append(
+                "photo_echo requires a seam object with anchor and side")
+        else:
+            anchor = seam.get("anchor")
+            if not isinstance(anchor, str) or not anchor.strip():
+                errors.append(
+                    "seam.anchor must name the source content line the tear "
+                    "follows (e.g. 'lake horizon', 'mountain ridge') so the "
+                    "photo and the illustration stay continuous across it")
+            if seam.get("side") not in SEAM_SIDES:
+                errors.append("seam.side must be one of %s, got %r"
+                              % (", ".join(SEAM_SIDES), seam.get("side")))
 
     edge = plan.get("edge_profile") or {}
     for f in REQUIRED_EDGE_FIELDS:
@@ -526,6 +702,11 @@ def main():
                     "photo_window declared but mask is not rectangular "
                     "(rectangularity=%.3f < %.2f)"
                     % (metrics["rectangularity"], PHOTO_WINDOW_RECT_MIN))
+        if mode == "photo_echo":
+            seam_plan = plan.get("seam") if isinstance(plan.get("seam"),
+                                                       dict) else {}
+            metrics["photo_echo"] = check_photo_echo(
+                mask, metrics, seam_plan, errors)
         if mode in ORGANIC_MODES:
             limit = metrics["straight_edge_limit_px"]
             if metrics["rectangularity"] >= RECTANGULARITY_ERROR:
