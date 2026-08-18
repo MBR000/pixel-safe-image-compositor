@@ -1,6 +1,6 @@
 ---
 name: pixel-safe-image-compositor
-description: This skill should be used when compositing images where a visual AI designs the layout, background, and creative transitions, while programmatic mask restoration and SHA-256 pixel verification guarantee that a protected source region is never repainted by the AI. It supports subject_cutout, organic_context, and photo_window modes with preflight mask geometry validation.
+description: This skill should be used when compositing images where a visual AI designs the layout, background, and creative transitions, while programmatic mask restoration and SHA-256 pixel verification guarantee that a protected source region is never repainted by the AI. It supports subject_cutout, organic_context, photo_window, and photo_echo modes with preflight mask geometry validation.
 ---
 
 # Pixel-Safe Image Compositor
@@ -39,13 +39,22 @@ source. An AI render is never accepted as proof of source fidelity.
 `scripts/run_compositor.py` runs all programmatic stages in order and
 records per-stage status in `pipeline-status.json`.
 
+## Choosing a mode
+
+Prefer `photo_echo` when the source is a full photograph with a usable
+horizon, ridge, or other content line: the photo runs full-bleed to the
+canvas edges and only one torn seam separates it from the illustrated
+layer. It produces the strongest "one continuous world on paper" read.
+Use `subject_cutout` / `organic_context` for isolated subjects, and
+`photo_window` only when an explicit rectangular photo frame is wanted.
+
 ## Step 1: composition-plan.json
 
 The AI must emit a JSON plan with ALL of these required fields:
 
 | Field | Meaning |
 |---|---|
-| `mode` | One of `subject_cutout`, `organic_context`, `photo_window` |
+| `mode` | One of `subject_cutout`, `organic_context`, `photo_window`, `photo_echo` |
 | `focal_group` | The protected subject group that must be preserved |
 | `eye_path` | Intended viewing path through the composition |
 | `keep_context` | Source context elements to keep |
@@ -55,12 +64,13 @@ The AI must emit a JSON plan with ALL of these required fields:
 | `source_crop` | Crop of the source used as the protected region |
 | `placement` | Integer `{x, y, width, height}` placement on the canvas |
 | `layout_budget` | Space budget per layout zone |
-| `window` | Window config; for `photo_window` must set `type: "rectangle_mask"` |
+| `window` | Window config; `photo_window` needs `type: "rectangle_mask"`, `photo_echo` needs `type: "torn_seam"` |
 | `edge_profile` | Edge construction spec (see below) |
 | `transition` | Plan for AI-generated local transitions outside the protected edge |
 | `fusion` | Structured blending plan (see below) |
 | `atmosphere` | Editorial-collage design layer (see below) |
 | `preview_review_requirements` | Pre-generation commitments (see below) |
+| `seam` | photo_echo only: `{anchor, side}` for the torn seam (see below) |
 
 ### edge_profile (required keys)
 
@@ -111,8 +121,11 @@ tactile treatment lives strictly OUTSIDE the protected pixels.
 {
   "atmosphere": {
     "illustration_grammar": "field_led",
+    "photo_echo_subjects": ["rider silhouette", "lake pavilion",
+                            "mountain ridge line"],
     "illustration_field_share": 0.55,
     "quiet_share": 0.65,
+    "quiet_texture": "pale grey-green wash over visible paper grain",
     "edge_treatment": "torn_paper_fibrous",
     "chromatic_accent": {
       "hue": "clean tomato red",
@@ -128,15 +141,23 @@ tactile treatment lives strictly OUTSIDE the protected pixels.
 ```
 
 - `illustration_grammar`: one of `silhouette_led`, `contour_led`,
-  `field_led`, `rhythm_led`, `cut_paper_led`. Pick ONE primary grammar;
-  the illustration reinterprets a source element (e.g. the mountain redrawn
-  as a pale duotone ghost), it never traces the photo.
+  `field_led`, `rhythm_led`, `cut_paper_led`. Pick ONE primary grammar.
+- `photo_echo_subjects`: non-empty list of CONCRETE elements from the
+  photo that the illustration layer redraws in the chosen grammar (the
+  subject's silhouette, a building, the horizon, the sun). This is the
+  core of the zine look: the illustration is the photo's echo - the same
+  scene spoken in a second, graphic language. Generic doodles unrelated
+  to the photo are rejected by preflight and read as decoration.
 - `illustration_field_share`: 0.25-0.80 of the canvas. A small dotted motif
   in a corner plus two brush marks is a timid peripheral doodle, not a
   field - preflight rejects shares below 0.25. Enlarge the field before
   adding detail.
-- `quiet_share`: 0.45-0.90. Most of the illustration field stays unprinted;
-  blank paper is an active design element, not leftover space.
+- `quiet_share`: 0.45-0.90. Most of the illustration field stays LOW
+  CONTRAST - but quiet is a material, not a void.
+- `quiet_texture`: required description of what the quiet zones are made
+  of: watercolor washes, halftone grain, paper fiber, faint underprint.
+  Blank untextured paper is rejected; the reference works fill their
+  "empty" areas with low-contrast material that carries the atmosphere.
 - `edge_treatment`: `torn_paper_fibrous` (default; irregular hand-ripped
   contour with a narrow fringe of paper fibers painted by the AI along the
   OUTSIDE of the protected boundary), `soft_fiber_fringe`, or
@@ -157,6 +178,21 @@ tactile treatment lives strictly OUTSIDE the protected pixels.
   typewriter/letterpress lettering in charcoal or brown-black; it is the
   resting point of the eye path, never a headline. This is the ONLY
   permitted AI-generated text.
+
+### seam (required for photo_echo)
+
+```json
+{ "seam": { "anchor": "lake horizon", "side": "top" } }
+```
+
+- `anchor` names the CONTENT LINE in the photo that the tear follows
+  (horizon, ridge, rooftop line). The seam is not an arbitrary curve: it
+  sits on a structural line of the photo so the illustrated layer beyond
+  it continues the same scene and the tear reads as "paper ripped open to
+  reveal the real world".
+- `side`: which boundary of the protected region is the torn seam
+  (`left`, `right`, `top`, `bottom`). All other photo edges run full-bleed
+  to the canvas.
 
 ### preview_review_requirements (required keys, all must be `true`)
 
@@ -214,17 +250,47 @@ Conversely, a `photo_window` plan requires a near-rectangular mask
 (rectangularity >= 0.98); declaring `photo_window` with an organic mask is
 also rejected.
 
+### photo_echo
+
+The zine layout: the protected photo runs FULL-BLEED to the canvas edges
+(typically three sides) and one organic torn seam separates it from the
+illustrated paper layer. Requires:
+
+```json
+{ "mode": "photo_echo", "window": { "type": "torn_seam" },
+  "seam": { "anchor": "lake horizon", "side": "top" } }
+```
+
+Geometry gates enforced by preflight:
+
+- The mask must cover at least 25% of the canvas perimeter (full-bleed);
+  a floating shape must use an organic mode instead.
+- Boundary segments lying ON the canvas border are exempt from all
+  straightness checks - that is the point of full-bleed. The
+  rectangularity and visual-rectangle gates do not apply in this mode.
+- Every INTERIOR boundary segment (the torn seam) must read as a
+  hand-torn edge: no straight run longer than 12% of the longest
+  dimension, no near-straight segment at any angle longer than 15%, no
+  regular sawtooth, and real variation (a flat seam is not a tear).
+- The declared `seam.side` must actually be an interior boundary, not a
+  canvas edge.
+
 ## Step 3: two-stage AI generation, then programmatic restore
 
 1. Stage A: generate the paper, the LARGE illustration field (per
    `atmosphere.illustration_grammar` and `illustration_field_share`), the
-   chromatic accent structure, and the background. The illustration is a
-   bold reinterpretation of a source element at meaningful scale, with
-   generous internal quiet space.
+   chromatic accent structure, and the background. The illustration MUST
+   redraw the planned `photo_echo_subjects` - the photo's own subjects,
+   horizon, buildings, sun - in the chosen grammar, at meaningful scale.
+   In `photo_echo` mode the illustrated layer continues the photo's scene
+   across the seam: the `seam.anchor` content line flows through the tear
+   and the same landmarks appear on both sides in two languages. Quiet
+   zones are laid in with the planned `quiet_texture` (washes, halftone
+   grain, paper fiber) - never left as blank untextured paper.
 2. Stage B: generate the detached, locally open transition shapes, the
-   torn-paper fibrous edge along the OUTSIDE of the protected boundary, and
-   the micro-text line (when planned) - all strictly outside the protected
-   region.
+   torn-paper fibrous edge along the OUTSIDE of the protected boundary (in
+   `photo_echo`, along the seam), and the micro-text line (when planned) -
+   all strictly outside the protected region.
 3. Stage C (program, not AI): `restore_and_verify.py` pastes back the protected
    source pixels and verifies them per pixel with SHA-256.
 
@@ -248,6 +314,9 @@ The generation prompt must explicitly forbid:
 - full-image filters;
 - AI-generated text other than the single planned `micro_text` line;
 - timid peripheral doodles instead of a real illustration field;
+- illustration content unrelated to the photo - the field must redraw the
+  planned `photo_echo_subjects`;
+- blank untextured quiet zones - lay in the planned `quiet_texture`;
 - detached decorative color patches unrelated to source geometry;
 - clean digital clipping edges where a torn-paper edge was planned.
 
@@ -284,22 +353,27 @@ python scripts/preflight_composition.py \
 
 Reads the plan, validates required fields, mode, `window.type`,
 `edge_profile` (all `variation_scales` must be `true`), the `fusion` plan,
-the `atmosphere` design layer (grammar enum, field/quiet shares in range,
-edge treatment, structural chromatic accent, micro-text length limits),
-and the `preview_review_requirements` checklist (all entries must be
-`true`); loads the mask, rejects empty masks, and warns on anti-aliased
-(non-binary) masks. Geometry checks: rectangularity plus the perceptual
-rectangle gate (corner occupancy + mean side inset); broken-contour checks;
-longest exact straight edge in horizontal, vertical, and diagonal
-directions; longest near-straight segment at any angle (1 px chord
-tolerance); regular periodic sawtooth on every contour. In organic modes,
-any threshold violation exits with code 1. `photo_window` requires a
-near-rectangular mask. Writes a JSON report with `verified`, `errors`,
-`warnings`, and `mask_metrics` (including `corner_occupancy`,
-`side_inset_ratios`, `visual_rectangle`, `max_straight_any_angle_px`), and
-optionally renders `mask-preview.png` (with `--source`, the preview shows
-the real source content inside the protected region and a dimmed source
-outside).
+the `atmosphere` design layer (grammar enum, concrete `photo_echo_subjects`,
+field/quiet shares in range, `quiet_texture`, edge treatment, structural
+chromatic accent, micro-text length limits), the `seam` declaration in
+`photo_echo` mode, and the `preview_review_requirements` checklist (all
+entries must be `true`); loads the mask, rejects empty masks, and warns on
+anti-aliased (non-binary) masks. Geometry checks: rectangularity plus the
+perceptual rectangle gate (corner occupancy + mean side inset);
+broken-contour checks; longest exact straight edge in horizontal, vertical,
+and diagonal directions; longest near-straight segment at any angle (1 px
+chord tolerance); regular periodic sawtooth on every contour. In organic
+modes, any threshold violation exits with code 1. `photo_window` requires a
+near-rectangular mask. `photo_echo` requires full-bleed coverage of the
+canvas perimeter, exempts border-hugging boundary segments, and applies the
+straightness/sawtooth/variation gates to the interior torn seam. Writes a
+JSON report with `verified`, `errors`, `warnings`, and `mask_metrics`
+(including `corner_occupancy`, `side_inset_ratios`, `visual_rectangle`,
+`max_straight_any_angle_px`, and in photo_echo mode a `photo_echo` block
+with `border_bleed_fraction`, per-side `edge_hug`, and per-seam metrics),
+and optionally renders `mask-preview.png` (with `--source`, the preview
+shows the real source content inside the protected region and a dimmed
+source outside).
 
 ### Restore and verify
 
@@ -406,11 +480,14 @@ It covers: a free-form mask passing preflight; rectangular masks,
 wobbly-edged "visual rectangles", long straight edges, shallow diagonals,
 and regular sawtooth rejected in organic modes; `false` checklist values,
 invalid `fusion` plans, and invalid `atmosphere` plans (bad grammar, timid
-field shares, over-length micro-text) rejected; `photo_window` accepting rectangles
-and rejecting organic masks; anti-aliased mask warnings; the source-overlay
-preview; non-integer placement rejection; the restore round-trip with zero
-mismatch; plan/manifest cross-checks; provenance fields (mask/prompt
-hashes, sizes, crop); report files written on IO failure; visual-review
-schema, pass, and fail paths; the unified runner's happy path, stop-on-
-failure, and failed-review handling; and both smoothing modes of
-`smooth_mask.py`.
+field shares, missing `photo_echo_subjects`/`quiet_texture`, over-length
+micro-text) rejected; `photo_window` accepting rectangles and rejecting
+organic masks; `photo_echo` accepting a full-bleed mask with a torn seam
+and rejecting straight seams, floating masks, and missing seam/window
+declarations - while the same full-bleed mask still fails organic modes;
+anti-aliased mask warnings; the source-overlay preview; non-integer
+placement rejection; the restore round-trip with zero mismatch;
+plan/manifest cross-checks; provenance fields (mask/prompt hashes, sizes,
+crop); report files written on IO failure; visual-review schema, pass, and
+fail paths; the unified runner's happy path, stop-on-failure, and
+failed-review handling; and both smoothing modes of `smooth_mask.py`.
