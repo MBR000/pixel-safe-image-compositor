@@ -56,7 +56,11 @@ to the source. An AI render is never accepted as proof of source fidelity.
    text alone. Validate the provider's actual output dimensions and
    normalize them with `scripts/normalize_generation_output.py` before any
    mask-based edit. Cache accepted Stage A and retry Stage B at most twice.
-   Every prompt includes the verbatim prohibition list.
+   Every prompt includes the verbatim prohibition list. Before either paid
+   request, use `scripts/generation_gate.py` to enforce the attempt budget.
+   For Stage B, run `scripts/preflight_stage_b.py` after normalization and
+   before sending the request. Use `scripts/cache_generation.py lookup` before
+   Stage A; record only accepted artifacts with `record`.
 7. Restore and verify:
 
    ```bash
@@ -80,8 +84,9 @@ to the source. An AI render is never accepted as proof of source fidelity.
 programmatic stages in order and writes `pipeline-status.json`.
 
 Generation is external to the runner. Record provider, model, prompt hashes,
-cache hits, and attempt counts in `generation-state.json` so a failed Stage B
-cannot silently trigger a new Stage A.
+cache hits, attempts, and fallback outcome in `generation-state.json`; pass it
+to the runner with `--generation-state` so `pipeline-status.json` distinguishes
+AI Stage B rejection from an accepted deterministic fallback.
 
 ## Choosing a mode
 

@@ -6,7 +6,9 @@ interface:
     SHA-256 pixel verification of the protected source region.
   default_prompt: >-
     First collect the compact creative brief and run source, provider, TLS,
-    geometry, and output-size preflight. Then composite this image following
-    the pixel-safe workflow: write composition-plan.json, generate Stage A
-    once, constrain Stage B with an exterior-only edit mask, and restore and
-    verify the protected pixels with scripts/restore_and_verify.py.
+    geometry, and output-size preflight. Check the content-addressed cache and
+    generation gate before any paid request. Then composite this image
+    following the pixel-safe workflow: write composition-plan.json, generate
+    Stage A once, normalize the provider output, preflight the exterior-only
+    Stage B mask, and restore and verify the protected pixels with
+    scripts/restore_and_verify.py.

@@ -13,6 +13,7 @@ Usage:
         --plan composition-plan.json --mask mask.png [--source source.png] \
         [--manifest manifest.json --ai-base final_ai_base.png] \
         [--review final-visual-review.json]
+        [--generation-state generation-state.json]
 
 Stages run based on the inputs provided:
   - --plan/--mask            preflight (always required)
@@ -80,6 +81,8 @@ def main():
                         help="AI-generated base image (Stage A + B output)")
     parser.add_argument("--review", default=None,
                         help="filled final-visual-review.json to validate")
+    parser.add_argument("--generation-state", default=None,
+                        help="optional external AI/fallback state JSON")
     args = parser.parse_args()
 
     if bool(args.manifest) != bool(args.ai_base):
@@ -90,6 +93,15 @@ def main():
 
     status = {"ok": False, "stages": []}
     wd = args.workdir
+
+    if args.generation_state:
+        try:
+            with open(args.generation_state, encoding="utf-8") as fh:
+                status["generation"] = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print("cannot read --generation-state: %s" % exc,
+                  file=sys.stderr)
+            return 2
 
     preflight_out = os.path.join(wd, "composition.preflight.json")
     preview = os.path.join(wd, "mask-preview.png")

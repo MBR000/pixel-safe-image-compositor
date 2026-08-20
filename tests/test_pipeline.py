@@ -673,6 +673,23 @@ class RunnerTests(unittest.TestCase):
                 self.assertTrue(os.path.exists(os.path.join(workdir, name)),
                                 name)
 
+    def test_generation_state_is_carried_into_pipeline_status(self):
+        with tempfile.TemporaryDirectory() as td:
+            plan, mask, manifest, base = self.setup_inputs(td)
+            workdir = os.path.join(td, "out")
+            state = os.path.join(td, "generation-state.json")
+            with open(state, "w", encoding="utf-8") as fh:
+                json.dump({"status": "fallback_accepted",
+                           "stage_b_ai": "rejected"}, fh)
+            proc = run_script("run_compositor.py", "--workdir", workdir,
+                              "--plan", plan, "--mask", mask,
+                              "--manifest", manifest, "--ai-base", base,
+                              "--generation-state", state)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            status = self.read_status(workdir)
+            self.assertEqual(status["generation"]["status"],
+                             "fallback_accepted")
+
     def test_failed_visual_review_fails_pipeline(self):
         with tempfile.TemporaryDirectory() as td:
             plan, mask, manifest, base = self.setup_inputs(td)
@@ -826,6 +843,58 @@ class GenerationGuardTests(unittest.TestCase):
             protected = np.asarray(Image.open(mask).convert("L")) > 127
             self.assertTrue(np.all(local[protected] == 255))
             self.assertGreater(int((local == 0).sum()), 0)
+
+    def test_stage_b_preflight_rejects_size_mismatch(self):
+        with tempfile.TemporaryDirectory() as td:
+            image = os.path.join(td, "image.png")
+            edit = os.path.join(td, "edit.png")
+            protected = os.path.join(td, "protected.png")
+            out = os.path.join(td, "report.json")
+            Image.new("RGBA", (32, 32), (240, 230, 210, 255)).save(image)
+            Image.new("RGBA", (31, 32), (255, 255, 255, 255)).save(edit)
+            save_mask(blob_mask(8, 2), protected)
+            proc = run_script("preflight_stage_b.py", "--image", image,
+                              "--edit-mask", edit, "--protected-mask", protected,
+                              "--placement", "10,10", "--out", out)
+            self.assertEqual(proc.returncode, 1)
+            with open(out, encoding="utf-8") as fh:
+                report = json.load(fh)
+            self.assertTrue(any("size mismatch" in e for e in report["errors"]))
+
+    def test_generation_gate_blocks_exhausted_stage_a(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = os.path.join(td, "state.json")
+            out = os.path.join(td, "gate.json")
+            with open(state, "w", encoding="utf-8") as fh:
+                json.dump({"stage_a_attempts_used": 1,
+                           "stage_a_max_attempts": 1}, fh)
+            proc = run_script("generation_gate.py", "--state", state,
+                              "--stage", "stage-a", "--out", out)
+            self.assertEqual(proc.returncode, 1)
+            with open(out, encoding="utf-8") as fh:
+                report = json.load(fh)
+            self.assertFalse(report["allowed"])
+
+    def test_generation_cache_record_then_lookup(self):
+        with tempfile.TemporaryDirectory() as td:
+            source = os.path.join(td, "source.png")
+            plan = os.path.join(td, "plan.json")
+            prompt = os.path.join(td, "prompt.txt")
+            artifact = os.path.join(td, "artifact.png")
+            cache = os.path.join(td, "cache")
+            Image.new("RGBA", (8, 8), (1, 2, 3, 255)).save(source)
+            with open(plan, "w", encoding="utf-8") as fh: fh.write("{}")
+            with open(prompt, "w", encoding="utf-8") as fh: fh.write("paper")
+            Image.new("RGBA", (16, 16), (4, 5, 6, 255)).save(artifact)
+            common = ("--stage", "stage-a", "--source", source, "--plan", plan,
+                      "--prompt", prompt, "--model", "test-model",
+                      "--canvas", "16x16", "--cache-dir", cache)
+            rec = run_script("cache_generation.py", "record", *common,
+                             "--artifact", artifact)
+            self.assertEqual(rec.returncode, 0, rec.stderr)
+            lookup = run_script("cache_generation.py", "lookup", *common)
+            self.assertEqual(lookup.returncode, 0, lookup.stderr)
+            self.assertTrue(json.loads(lookup.stdout)["cache_hit"])
 
 
 if __name__ == "__main__":

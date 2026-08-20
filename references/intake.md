@@ -20,6 +20,12 @@ sizes, or certificate state: inspect those automatically. If a watermark
 crosses the protected region, state that it will be preserved and request an
 authorized clean source when removal is desired.
 
+Mask semantics remain a human-review gate: show the source-overlay preview at
+thumbnail and 2x edge scale, confirm whether contact shadow/background is
+inside the protected region, and record that decision in `creative-brief.json`.
+Geometry preflight proves shape safety, not that the silhouette is semantically
+the exact foreground subject.
+
 ## Before generation
 
 Write the resolved answers to `creative-brief.json`. Show the user one mask
@@ -34,3 +40,8 @@ accepted stage by source hash, plan hash, prompt hash, model, and generation
 canvas. Transport/TLS failures do not consume a generation attempt. A Stage B
 failure must reuse the accepted Stage A output and regenerate only the
 transition layer. Never regenerate a verified protected subject.
+
+Use `scripts/generation_gate.py` immediately before a paid request. Use
+`scripts/preflight_stage_b.py` after output normalization; a provider request
+is forbidden when image and edit-mask dimensions differ, alpha is non-binary,
+or any protected pixel is editable.

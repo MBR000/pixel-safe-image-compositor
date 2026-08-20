@@ -38,6 +38,11 @@ the protected subject editable.
 and deterministically resizes it to the planned generation canvas before a
 Stage B mask is submitted. Never assume the API honored the requested size.
 
+`cache_generation.py` provides content-addressed `lookup`/`record` operations
+for accepted Stage A/B artifacts. `generation_gate.py` enforces the attempt
+budget. `preflight_stage_b.py` validates image/mask dimensions, binary alpha,
+and protected-pixel opacity before a provider edit request.
+
 ## Preflight validation
 
 ```bash
@@ -145,7 +150,8 @@ subject must never be regenerated. Referenced evidence images must exist.
 python scripts/run_compositor.py --workdir out \
     --plan composition-plan.json --mask mask.png --source source.png \
     --manifest manifest.json --ai-base final_ai_base.png \
-    [--review final-visual-review.json]
+    [--review final-visual-review.json] \
+    [--generation-state generation-state.json]
 ```
 
 Runs preflight -> restore+verify -> thumbnail -> review check in order,
