@@ -757,5 +757,76 @@ class SmoothMaskTests(unittest.TestCase):
         self.assertEqual(len(pts), 12)
 
 
+class GenerationGuardTests(unittest.TestCase):
+
+    def test_generation_output_normalization(self):
+        with tempfile.TemporaryDirectory() as td:
+            source = os.path.join(td, "source.png")
+            out = os.path.join(td, "normalized.png")
+            Image.new("RGB", (11, 7), (240, 230, 210)).save(source)
+            proc = run_script("normalize_generation_output.py", "--input",
+                              source, "--expected-size", "16x16", "--out", out)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            with Image.open(out) as image:
+                self.assertEqual(image.size, (16, 16))
+
+    def test_generation_output_identity_is_not_resized(self):
+        with tempfile.TemporaryDirectory() as td:
+            source = os.path.join(td, "source.png")
+            out = os.path.join(td, "normalized.png")
+            Image.new("RGBA", (16, 16), (240, 230, 210, 255)).save(source)
+            proc = run_script("normalize_generation_output.py", "--input",
+                              source, "--expected-size", "16x16", "--out", out)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            with Image.open(out) as image:
+                self.assertEqual(image.mode, "RGBA")
+
+    def test_environment_preflight_does_not_expose_credential(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "environment.json")
+            env = os.environ.copy()
+            env.pop("TEST_IMAGE_KEY", None)
+            proc = subprocess.run(
+                [sys.executable, os.path.join(SCRIPTS,
+                 "preflight_environment.py"), "--out", out,
+                 "--final-size", "1242x1660", "--credential-env",
+                 "TEST_IMAGE_KEY"], capture_output=True, text=True, env=env)
+            self.assertEqual(proc.returncode, 1)
+            with open(out, encoding="utf-8") as fh:
+                report = json.load(fh)
+            self.assertFalse(report["verified"])
+            self.assertNotIn("secret", proc.stdout.lower())
+
+    def test_environment_preflight_records_deterministic_crop(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "environment.json")
+            env = os.environ.copy(); env["TEST_IMAGE_KEY"] = "present"
+            proc = subprocess.run(
+                [sys.executable, os.path.join(SCRIPTS,
+                 "preflight_environment.py"), "--out", out,
+                 "--final-size", "1242x1660", "--generation-size",
+                 "1248x1664", "--credential-env", "TEST_IMAGE_KEY"],
+                capture_output=True, text=True, env=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            with open(out, encoding="utf-8") as fh:
+                report = json.load(fh)
+            self.assertTrue(any("differs" in w for w in report["warnings"]))
+
+    def test_transition_mask_never_marks_protected_pixels_editable(self):
+        with tempfile.TemporaryDirectory() as td:
+            mask = os.path.join(td, "mask.png")
+            out = os.path.join(td, "transition.png")
+            save_mask(blob_mask(40, 10), mask)
+            proc = run_script("build_transition_mask.py", "--mask", mask,
+                              "--canvas", "80x80", "--placement", "20,20",
+                              "--out", out)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            alpha = np.asarray(Image.open(out).getchannel("A"))
+            local = alpha[20:60, 20:60]
+            protected = np.asarray(Image.open(mask).convert("L")) > 127
+            self.assertTrue(np.all(local[protected] == 255))
+            self.assertGreater(int((local == 0).sum()), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

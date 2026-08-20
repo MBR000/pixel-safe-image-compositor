@@ -25,6 +25,32 @@ invalid field.
 | `preview_review_requirements` | Pre-generation commitments (see below) |
 | `seam` | photo_echo only: `{anchor, side}` for the torn seam (see below) |
 
+## generation_contract (recommended)
+
+Record generation-only canvas mapping and retry policy separately from the
+pixel restoration placement. Older plans remain valid without this block.
+
+```json
+{
+  "generation_contract": {
+    "final_canvas": {"width": 1242, "height": 1660},
+    "generation_canvas": {"width": 1248, "height": 1664},
+    "final_crop": {"x": 3, "y": 2, "width": 1242, "height": 1660},
+    "generation_placement": {"x": 439, "y": 612, "width": 370, "height": 442},
+    "stage_a_max_attempts": 1,
+    "stage_b_max_attempts": 2,
+    "stage_b_mask_semantics": "openai-transparent-editable",
+    "cache_key_fields": ["source_sha256", "plan_sha256", "prompt_sha256", "model", "generation_canvas"]
+  }
+}
+```
+
+The final crop must be deterministic and applied before protected-pixel
+restoration. `generation_placement.x/y` equals final `placement.x/y` plus
+`final_crop.x/y`; guide and edit-mask scripts apply this with
+`--final-crop-offset`. Stage B must use an exterior-only edit mask;
+coordinates in a prompt are supporting context, never the sole constraint.
+
 ## edge_profile (required keys)
 
 ```json

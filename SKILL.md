@@ -24,16 +24,24 @@ to the source. An AI render is never accepted as proof of source fidelity.
   prompt-prohibition list. Read before writing any generation prompt.
 - `references/scripts.md` - detailed script behavior, report fields, the
   visual-review JSON schema, and test coverage.
+- `references/intake.md` - compact user intake, automatic defaults,
+  generation budgets, and cache rules. Read before asking questions.
 
 ## Workflow
 
-1. Write `composition-plan.json` per `references/plan-schema.md`
+1. Run the compact intake in `references/intake.md`; write the resolved
+   answers to `creative-brief.json`. Inspect source and environment instead
+   of asking for facts that can be derived.
+2. Run `scripts/preflight_environment.py` before any model request. It must
+   pass dependency, credential, TLS/provider, source, and generation-size
+   checks. A transport failure does not consume a generation attempt.
+3. Write `composition-plan.json` per `references/plan-schema.md`
    (planning only, no pixels yet).
-2. Build the protected-region mask. Smooth it with
+4. Build the protected-region mask. Smooth it with
    `scripts/smooth_mask.py` (Chaikin corner cutting on a polygon, or
    blur-smoothing a rough mask). The mask must be binary (0/255):
    anti-aliased masks make the approved and restored shapes diverge.
-3. Validate plan and mask:
+5. Validate plan and mask:
 
    ```bash
    python scripts/preflight_composition.py --plan composition-plan.json \
@@ -42,11 +50,14 @@ to the source. An AI render is never accepted as proof of source fidelity.
    ```
 
    Exit code 1 means stop and fix. Never generate on a failed preflight.
-4. Generate with the AI in two stages per
-   `references/generation-guide.md`: Stage A (paper, illustration field,
-   background), then Stage B (detached transitions, torn edge,
-   micro-text). Every prompt includes the verbatim prohibition list.
-5. Restore and verify:
+6. Render `scripts/build_generation_guide.py` and review the final-canvas
+   mapping. Generate Stage A once. For Stage B, use the exterior-only edit
+   mask from `scripts/build_transition_mask.py`; never rely on coordinate
+   text alone. Validate the provider's actual output dimensions and
+   normalize them with `scripts/normalize_generation_output.py` before any
+   mask-based edit. Cache accepted Stage A and retry Stage B at most twice.
+   Every prompt includes the verbatim prohibition list.
+7. Restore and verify:
 
    ```bash
    python scripts/restore_and_verify.py --ai-base final_ai_base.png \
@@ -56,7 +67,7 @@ to the source. An AI render is never accepted as proof of source fidelity.
 
    Any pixel mismatch yields `verified=false` and a non-zero exit code;
    reject the result.
-6. Evidence-based visual review: render the thumbnail with
+8. Evidence-based visual review: render the thumbnail with
    `scripts/visual_review.py --final final.png --thumbnail
    final.thumbnail.png`, inspect BOTH images, write
    `final-visual-review.json` with honest `pass`/`fail` verdicts, and
@@ -67,6 +78,10 @@ to the source. An AI render is never accepted as proof of source fidelity.
 `scripts/run_compositor.py --workdir out --plan ... --mask ...
 --source ... [--manifest ... --ai-base ...] [--review ...]` runs all
 programmatic stages in order and writes `pipeline-status.json`.
+
+Generation is external to the runner. Record provider, model, prompt hashes,
+cache hits, and attempt counts in `generation-state.json` so a failed Stage B
+cannot silently trigger a new Stage A.
 
 ## Choosing a mode
 
@@ -101,6 +116,9 @@ programmatic stages in order and writes `pipeline-status.json`.
   AI-generated text.
 - Never treat AI output as evidence that the source pixels survived; the
   only proof is the SHA-256 report from `restore_and_verify.py`.
+- Never start a paid request when environment or geometry preflight fails.
+  Never regenerate accepted Stage A for a Stage B visual failure, and never
+  pass a full-canvas Stage B edit mask for local exterior transitions.
 
 ## Deliverables
 
@@ -117,4 +135,6 @@ pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-40 tests; coverage details in `references/scripts.md`.
+Run the test command rather than relying on a hard-coded test count; the
+suite includes the original pipeline coverage plus environment and guide
+checks.

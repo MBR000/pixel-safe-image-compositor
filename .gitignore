@@ -10,5 +10,20 @@ Thumbs.db
 
 # Generated artifacts - never commit real images or AI outputs
 out/
+outputs/
+work/
 dist/
 *.generated.png
+
+# Root-level compositor run artifacts
+/composition-plan.json
+/composition.preflight.json
+/environment.preflight.json
+/final-visual-review.json
+/final.png
+/final.thumbnail.png
+/final.verification.json
+/generation-state.json
+/manifest.json
+/mask-preview.png
+/pipeline-status.json

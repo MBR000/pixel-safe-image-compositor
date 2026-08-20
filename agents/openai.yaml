@@ -5,7 +5,8 @@ interface:
     AI-designed image compositing with programmatic mask restoration and
     SHA-256 pixel verification of the protected source region.
   default_prompt: >-
-    Composite this image following the pixel-safe workflow: write
-    composition-plan.json, validate it with scripts/preflight_composition.py,
-    generate the background with the visual AI, then restore and verify the
-    protected pixels with scripts/restore_and_verify.py.
+    First collect the compact creative brief and run source, provider, TLS,
+    geometry, and output-size preflight. Then composite this image following
+    the pixel-safe workflow: write composition-plan.json, generate Stage A
+    once, constrain Stage B with an exterior-only edit mask, and restore and
+    verify the protected pixels with scripts/restore_and_verify.py.

@@ -18,6 +18,26 @@ python scripts/smooth_mask.py --mask rough-mask.png --out mask.png \
 Always re-run preflight on the smoothed mask; smoothing helps meet the
 geometry limits but does not guarantee them.
 
+## Environment and generation guides
+
+Before an external model request:
+
+```bash
+python scripts/preflight_environment.py --source source.png \
+  --final-size 1242x1660 --generation-size 1248x1664 \
+  --model gpt-image-2 --endpoint https://example/v1/models \
+  --ca-bundle /path/to/trusted-ca.pem --out environment.preflight.json
+```
+
+`build_generation_guide.py` renders a review-only final-canvas placement
+guide. `build_transition_mask.py` emits an RGBA OpenAI-style edit mask whose
+transparent pixels are sparse exterior transition sectors; it never marks
+the protected subject editable.
+
+`normalize_generation_output.py` checks the provider's actual returned size
+and deterministically resizes it to the planned generation canvas before a
+Stage B mask is submitted. Never assume the API honored the requested size.
+
 ## Preflight validation
 
 ```bash
