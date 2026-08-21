@@ -41,6 +41,11 @@ to the source. An AI render is never accepted as proof of source fidelity.
    `scripts/smooth_mask.py` (Chaikin corner cutting on a polygon, or
    blur-smoothing a rough mask). The mask must be binary (0/255):
    anti-aliased masks make the approved and restored shapes diverge.
+   Shape-first alternative for organic modes: design the boundary from
+   the composition style with `scripts/design_shape.py` (leaf, pebble,
+   torn, brush templates), then scale and place the subject into it with
+   `scripts/fit_subject.py`; the baked RGBA cutout becomes the protected
+   source and the shape mask is used as-is.
 5. Validate plan and mask:
 
    ```bash

@@ -18,6 +18,32 @@ python scripts/smooth_mask.py --mask rough-mask.png --out mask.png \
 Always re-run preflight on the smoothed mask; smoothing helps meet the
 geometry limits but does not guarantee them.
 
+## Shape-first boundary design
+
+```bash
+# 1. design the boundary from the composition style
+python scripts/design_shape.py --template leaf --canvas 900x1100 \
+    --out shape.png --seed 7 [--fill 0.84] [--rotate 0]
+
+# 2. scale and place the subject into the shape, bake the cutout
+python scripts/fit_subject.py --shape shape.png --source photo.png \
+    --out source_cutout.png --report fit-report.json \
+    [--subject-box x,y,w,h] [--inner-margin 24]
+```
+
+`design_shape.py` builds an organic mask as a polar radius curve with
+three octaves of random harmonic variation (templates: `leaf`, `pebble`,
+`torn`, `brush`). Run preflight on the result; on a geometry failure try
+another seed. `fit_subject.py` inverts the mask-around-subject flow: it
+finds the largest scale and offset of the photo such that the photo fully
+covers the shape AND the subject box (auto-detected by gradient energy,
+or given with `--subject-box`) fits inside the shape eroded by
+`--inner-margin`, then resamples the photo ONCE (Lanczos) and bakes an
+RGBA cutout whose alpha equals the shape mask. The baked cutout is the
+protected source from then on; the fit report records the original
+photo's SHA-256, the scale, and the offset for provenance. The manifest
+must not repeat the scale - restoration still forbids transforms.
+
 ## Environment and generation guides
 
 Before an external model request:
