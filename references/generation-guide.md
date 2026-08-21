@@ -23,6 +23,14 @@ or evenly padded photo island merely because it is easy to mask. If a static
 subject needs a rounded shape, make it a deliberate `counterform` and state
 what negative space it creates.
 
+Integration constraints are equally important: render micro-text directly
+into the paper grain or as a restrained letterpress imprint, never inside a
+rounded label or opaque rectangular card. Any cleanup or cover-up must use
+sampled local paper/source texture with feathered edges. Never hide a
+generation error with a large uniform wash. The seam must share material,
+color, or contour with both neighboring layers so it does not read as a
+high-contrast cut-paper hole.
+
 ## Stage B: transitions, torn edge, micro-text
 
 Generate the detached, locally open transition shapes, the torn-paper

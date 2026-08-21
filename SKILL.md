@@ -16,7 +16,7 @@ to the source. An AI render is never accepted as proof of source fidelity.
 ## References (read on demand)
 
 - `references/plan-schema.md` - full `composition-plan.json` schema with
-  JSON examples (`design_intent`, `edge_profile`, `fusion`, `atmosphere`, `seam`,
+  JSON examples (`design_intent`, `integration_constraints`, `edge_profile`, `fusion`, `atmosphere`, `seam`,
   `preview_review_requirements`). Read BEFORE writing the plan.
 - `references/geometry-gates.md` - hard mask-geometry gates per mode.
   Read before building the mask.
@@ -40,6 +40,9 @@ to the source. An AI render is never accepted as proof of source fidelity.
    `design_intent`: choose a directional shape language, name the subject's
    motion axis, state the leading mass and trailing taper, cap the retained
    context budget, and explain why the shape supports the eye path.
+   Also include `integration_constraints`: text must sit in native paper
+   material, cover-up patches must be textured and feathered, and the seam
+   must use material continuation rather than a hard cutout.
 4. Build the protected-region mask. Smooth it with
    `scripts/smooth_mask.py` (Chaikin corner cutting on a polygon, or
    blur-smoothing a rough mask). The mask must be binary (0/255):
@@ -48,7 +51,13 @@ to the source. An AI render is never accepted as proof of source fidelity.
    the composition style with `scripts/design_shape.py` (leaf, pebble,
    torn, brush templates), then scale and place the subject into it with
    `scripts/fit_subject.py`; the baked RGBA cutout becomes the protected
-   source and the shape mask is used as-is.
+   source and the shape mask is used as-is. For the Zeejay-style default,
+   build an open full-bleed seam with:
+
+   ```bash
+   python scripts/build_photo_echo_mask.py --canvas 1242x1660 \
+       --side top --anchor horizon --out mask.png
+   ```
 5. Validate plan and mask:
 
    ```bash
@@ -98,7 +107,7 @@ AI Stage B rejection from an accepted deterministic fallback.
 
 ## Choosing a mode
 
-- `photo_echo` - preferred when the source is a full photograph with a
+- `photo_echo` - default for a full photograph with a
   usable content line (horizon, ridge): the photo runs full-bleed to the
   canvas edges and one torn seam separates it from the illustrated layer.
   Strongest "one continuous world on paper" read.
@@ -135,9 +144,11 @@ AI Stage B rejection from an accepted deterministic fallback.
   structural chromatic accent; `micro_text` is the only permitted
   AI-generated text.
 - Visual review must explicitly pass `shape_serves_motion` and
-  `no_default_oval_island`; if either fails, redesign the protected shape
-  before retrying Stage B. Do not polish a weak silhouette with extra fibers
-  or color.
+  `no_default_oval_island`, `no_hard_coverup_panels`,
+  `text_integrated_into_material`, `no_uniform_wash_island`,
+  `seam_material_continuity`, and `paper_torn_read`; if any fails, redesign
+  the integration before retrying Stage B. Do not polish a weak silhouette with extra fibers,
+  rectangles, or color blocks.
 - Never treat AI output as evidence that the source pixels survived; the
   only proof is the SHA-256 report from `restore_and_verify.py`.
 - Never start a paid request when environment or geometry preflight fails.

@@ -33,6 +33,9 @@ SHA-256 校验。AI 渲染结果永远不会被当作源图保真的证明。
   - `subject_cutout`——干净抠图主体置于设计好的画面场域中
   - `organic_context`——主体融入有机插画场景
   - `photo_window`——显式的矩形照片窗口（唯一允许矩形 mask 的模式）
+- 对包含地平线、山脊、桌沿、屋顶线或人物动作线的完整照片，默认使用
+  `photo_echo`，通过 `scripts/build_photo_echo_mask.py` 生成开放式满幅撕缝，
+  不要先把照片包进闭合的有机 blob。
 - 有机模式下的硬性几何限制，全部由代码强制执行：
   - 禁止矩形 / 圆角矩形 / 规则撕边
   - 禁止"视觉矩形"：结合矩形度（rectangularity）、四角占用率（corner

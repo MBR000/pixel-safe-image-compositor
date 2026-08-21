@@ -24,6 +24,7 @@ invalid field.
 | `atmosphere` | Editorial-collage design layer (see below) |
 | `preview_review_requirements` | Pre-generation commitments (see below) |
 | `design_intent` | Authored shape language and motion logic (see below) |
+| `integration_constraints` | Material, text, cover-up, and seam continuity limits |
 | `seam` | photo_echo only: `{anchor, side}` for the torn seam (see below) |
 
 ## generation_contract (recommended)
@@ -95,6 +96,32 @@ counterform role.
 is the approximate fraction of the source crop retained around the focal
 subject and must stay between `0.10` and `0.60`. `leading_mass` and
 `trailing_taper` make the directional asymmetry explicit.
+
+## integration_constraints (required for new plans)
+
+These constraints prevent a technically valid collage from reading as a
+stack of pasted layers. They are intentionally stricter than the generic
+transition rules.
+
+```json
+{
+  "integration_constraints": {
+    "text_treatment": "native_paper",
+    "no_opaque_rectangles": true,
+    "coverup_texture": "sampled_paper_fiber",
+    "seam_edge_strategy": "feathered_material_continuation",
+    "max_uniform_patch_share": 0.05,
+    "max_text_backplate_share": 0.01
+  }
+}
+```
+
+`text_treatment` is `native_paper` or `letterpress_imprint`; a visible
+rounded label, card, or opaque text panel is not allowed. `coverup_texture`
+must be `sampled_paper_fiber`, `local_source_texture`, or `none`.
+`seam_edge_strategy` must be `feathered_material_continuation`,
+`contour_overlap`, or `underprint_passage`. Uniform patches may occupy at
+most 8% of the canvas, and any text backplate may occupy at most 2%.
 
 ## fusion (required keys)
 
@@ -216,3 +243,8 @@ is `final-visual-review.json`, where `fail` is a legal verdict.
 - `quiet_space_supports_eye_path`
 - `shape_serves_motion`
 - `no_default_oval_island`
+- `no_hard_coverup_panels`
+- `text_integrated_into_material`
+- `no_uniform_wash_island`
+- `seam_material_continuity`
+- `paper_torn_read`

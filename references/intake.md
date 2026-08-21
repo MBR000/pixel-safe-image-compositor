@@ -9,7 +9,8 @@ user does not specify a value.
 1. Final use and canvas size (default: preserve source dimensions).
 2. Protected subject or region (default: the visually isolated primary
    subject; confirm whether surrounding contact shadow belongs to it).
-3. Visual direction (default: quiet editorial collage with source-led colors).
+3. Visual direction (default: quiet editorial collage with source-led colors
+   and an open photo_echo seam when the source has a usable content line).
 4. Context to keep or discard (default: discard the original rectangular
    background, keep only source pixels inside the protected mask).
 5. Exact text, logos, or exclusions (default: no generated text, logos, or
@@ -19,6 +20,11 @@ Do not ask for source dimensions, alpha state, model-supported generation
 sizes, or certificate state: inspect those automatically. If a watermark
 crosses the protected region, state that it will be preserved and request an
 authorized clean source when removal is desired.
+
+When the source is a full photograph and exposes a usable horizon, ridge,
+tabletop, roofline, or gesture line, resolve the mode to `photo_echo` by
+default. Use `organic_context` only when the user explicitly wants an
+isolated subject floating in an illustrated field.
 
 Mask semantics remain a human-review gate: show the source-overlay preview at
 thumbnail and 2x edge scale, confirm whether contact shadow/background is

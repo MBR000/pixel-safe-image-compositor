@@ -40,6 +40,10 @@ agree with the subject's gesture or the declared eye path.
   asymmetry. If the subject is static, use a deliberate counterform or
   contour echo and document the negative-space role instead of defaulting to
   a centered pebble or oval.
+- Integration is a separate gate: no visible rectangular or rounded
+  cover-up panel may sit in the quiet field, no large uniform wash may erase
+  a generation error, and the seam must carry at least one shared material,
+  color, or contour cue across both sides.
 
 ## photo_window
 

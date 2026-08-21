@@ -159,6 +159,11 @@ python scripts/visual_review.py --check final-visual-review.json
   "micro_text_legible": "not_applicable",
   "shape_serves_motion": "pass",
   "no_default_oval_island": "pass",
+  "no_hard_coverup_panels": "pass",
+  "text_integrated_into_material": "pass",
+  "no_uniform_wash_island": "pass",
+  "seam_material_continuity": "pass",
+  "paper_torn_read": "pass",
   "review_notes": "transition shapes cluster too close to the boundary"
 }
 ```
@@ -169,9 +174,16 @@ python scripts/visual_review.py --check final-visual-review.json
 spelled and legible (`not_applicable` when `micro_text` was `null`).
 `shape_serves_motion` asks whether the protected shape has an intentional
 directional relationship to the subject gesture or declared eye path.
+`paper_torn_read` asks whether the thumbnail reads as paper torn open along
+one deliberate seam, rather than as a photo inside a closed organic blob.
 `no_default_oval_island` asks whether the protected region avoids an
 uninspired centered oval or evenly padded photo island. A geometrically safe
 shape may still fail either design verdict.
+`no_hard_coverup_panels` rejects visible rectangular or rounded cover-up
+blocks. `text_integrated_into_material` requires the micro-text to sit in the
+paper/source texture rather than on a label card. `no_uniform_wash_island`
+rejects large flat cleanup patches, and `seam_material_continuity` asks
+whether the seam shares material and color across both sides.
 Verdicts must be `"pass"` or `"fail"` - `fail` is legal and expected when
 the render is not good enough. Any `fail` exits 1 with the instruction to
 regenerate ONLY the Stage B transition layer; the verified protected

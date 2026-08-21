@@ -87,7 +87,16 @@ REQUIRED_REVIEW_FIELDS = (
     "quiet_space_supports_eye_path",
     "shape_serves_motion",
     "no_default_oval_island",
+    "no_hard_coverup_panels",
+    "text_integrated_into_material",
+    "no_uniform_wash_island",
+    "seam_material_continuity",
+    "paper_torn_read",
 )
+
+TEXT_TREATMENTS = ("native_paper", "letterpress_imprint")
+SEAM_EDGE_STRATEGIES = ("feathered_material_continuation",
+                        "contour_overlap", "underprint_passage")
 
 DESIGN_SHAPE_LANGUAGES = (
     "motion_brush",
@@ -579,6 +588,51 @@ def validate_design_intent(intent, errors, warnings):
             "counterform shape should explain the negative-space role")
 
 
+def validate_integration_constraints(constraints, errors, warnings):
+    """Reject cover-up patches that make a collage read as assembled."""
+    if not isinstance(constraints, dict):
+        errors.append(
+            "integration_constraints must describe text, cover-up, and seam "
+            "integration rules")
+        return
+    text = constraints.get("text_treatment")
+    if text not in TEXT_TREATMENTS:
+        errors.append(
+            "integration_constraints.text_treatment must be one of %s, got %r"
+            % (", ".join(TEXT_TREATMENTS), text))
+    if constraints.get("no_opaque_rectangles") is not True:
+        errors.append(
+            "integration_constraints.no_opaque_rectangles must be true; "
+            "hard rectangular cover-up panels are forbidden")
+    strategy = constraints.get("seam_edge_strategy")
+    if strategy not in SEAM_EDGE_STRATEGIES:
+        errors.append(
+            "integration_constraints.seam_edge_strategy must be one of %s, "
+            "got %r" % (", ".join(SEAM_EDGE_STRATEGIES), strategy))
+    share = constraints.get("max_uniform_patch_share")
+    if (not isinstance(share, (int, float)) or isinstance(share, bool)
+            or not 0.0 <= share <= 0.08):
+        errors.append(
+            "integration_constraints.max_uniform_patch_share must be in "
+            "[0.00, 0.08], got %r" % share)
+    backplate = constraints.get("max_text_backplate_share")
+    if (not isinstance(backplate, (int, float)) or isinstance(backplate, bool)
+            or not 0.0 <= backplate <= 0.02):
+        errors.append(
+            "integration_constraints.max_text_backplate_share must be in "
+            "[0.00, 0.02], got %r" % backplate)
+    if constraints.get("coverup_texture") not in (
+            "sampled_paper_fiber", "local_source_texture", "none"):
+        errors.append(
+            "integration_constraints.coverup_texture must be sampled_paper_fiber, "
+            "local_source_texture, or none")
+    if strategy == "feathered_material_continuation" \
+            and constraints.get("coverup_texture") == "none":
+        warnings.append(
+            "feathered seam strategy without a coverup texture may still read "
+            "as a cutout; verify the material bridge visually")
+
+
 def validate_plan(plan, errors, warnings):
     missing = [f for f in REQUIRED_PLAN_FIELDS if f not in plan]
     if missing:
@@ -665,6 +719,13 @@ def validate_plan(plan, errors, warnings):
             "legacy plan has no design_intent; new plans must declare a "
             "directional shape language, motion axis, leading mass, and "
             "trailing taper")
+    if "integration_constraints" in plan:
+        validate_integration_constraints(
+            plan.get("integration_constraints"), errors, warnings)
+    else:
+        warnings.append(
+            "legacy plan has no integration_constraints; new plans must "
+            "forbid hard cover-up panels and require material continuity")
 
     review = plan.get("preview_review_requirements") or {}
     for f in REQUIRED_REVIEW_FIELDS:

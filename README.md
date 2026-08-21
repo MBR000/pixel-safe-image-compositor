@@ -41,6 +41,10 @@ guarantee into code:
   - `organic_context` — subject blended into an organic illustrated scene
   - `photo_window` — explicit rectangular photo window (the only mode where
     a rectangle mask is legal)
+- For full photographs with a usable horizon, ridge, tabletop, roofline, or
+  gesture line, `photo_echo` is the default website-style path. Generate its
+  open seam with `scripts/build_photo_echo_mask.py` instead of wrapping the
+  photo in a closed organic blob.
 - Hard geometry limits for organic modes, enforced in code:
   - no rectangles / rounded rectangles / regular torn edges
   - no "visual rectangles": a perceptual gate combining rectangularity,

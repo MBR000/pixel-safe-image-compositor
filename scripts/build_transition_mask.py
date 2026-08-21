@@ -31,6 +31,8 @@ def main():
                    help="generation-to-final crop x,y; added to placement")
     p.add_argument("--out", required=True)
     p.add_argument("--radius", type=int, default=30)
+    p.add_argument("--seed", type=int, default=17,
+                   help="deterministic seed for sparse local fiber clusters")
     args = p.parse_args()
     try:
         ox, oy = (int(v) for v in args.placement.split(","))
@@ -46,17 +48,35 @@ def main():
         print("placement exceeds canvas", file=sys.stderr); return 1
     dil = np.asarray(Image.fromarray((local * 255).astype("uint8"))
                     .filter(ImageFilter.MaxFilter(max(3, args.radius * 2 + 1)))) > 127
-    # Use three disconnected sectors to avoid a continuous halo around the edge.
+    # Use deterministic, disconnected local clusters rather than broad
+    # rectangular sectors. This gives Stage B places to add fibers and
+    # material pulls without creating a continuous sticker-like halo.
     yy, xx = np.indices(local.shape)
-    sectors = (((xx < local.shape[1] * 0.42) & (yy < local.shape[0] * 0.55)) |
-               ((xx > local.shape[1] * 0.58) & (yy < local.shape[0] * 0.62)) |
-               (yy > local.shape[0] * 0.60))
-    editable = (dil & ~local & sectors)
+    rng = np.random.default_rng(args.seed)
+    boundary = dil & ~local
+    cluster_field = np.zeros(local.shape, dtype=bool)
+    count = max(5, min(12, int(np.sqrt(local.size) / 18)))
+    boundary_points = np.argwhere(boundary)
+    for _ in range(count):
+        if len(boundary_points):
+            cy, cx = boundary_points[rng.integers(0, len(boundary_points))]
+        else:
+            cx = rng.integers(0, local.shape[1])
+            cy = rng.integers(0, local.shape[0])
+        rx = int(rng.integers(max(6, args.radius // 3),
+                              max(10, args.radius + 1)))
+        ry = int(rng.integers(max(6, args.radius // 3),
+                              max(10, args.radius + 1)))
+        blob = (((xx - cx) / max(rx, 1)) ** 2 +
+                ((yy - cy) / max(ry, 1)) ** 2 <= 1.0)
+        cluster_field |= blob
+    editable = boundary & cluster_field
     rgba = np.full((ch, cw, 4), 255, dtype=np.uint8)
     rgba[oy:oy + local.shape[0], ox:ox + local.shape[1], 3][editable] = 0
     Image.fromarray(rgba).save(args.out, "PNG")
     report = {"verified": bool(editable.any()), "canvas": [cw, ch],
               "editable_pixels": int(editable.sum()), "radius": args.radius,
+              "seed": args.seed, "cluster_count": count,
               "generation_placement": [ox, oy],
               "final_crop_offset": [crop_x, crop_y],
               "semantics": "openai-transparent-editable"}

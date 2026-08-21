@@ -23,6 +23,7 @@ sys.path.insert(0, SCRIPTS)
 
 import preflight_composition as pf  # noqa: E402
 import smooth_mask as sm  # noqa: E402
+import build_photo_echo_mask as pem  # noqa: E402
 
 
 def full_plan(mode="subject_cutout", placement=None):
@@ -80,6 +81,14 @@ def full_plan(mode="subject_cutout", placement=None):
             "trailing_taper": "the tail and rear grass taper back into paper",
             "protected_context_budget": 0.34,
             "rationale": "The protected shape stretches with the running gesture instead of becoming a static oval.",
+        },
+        "integration_constraints": {
+            "text_treatment": "native_paper",
+            "no_opaque_rectangles": True,
+            "coverup_texture": "sampled_paper_fiber",
+            "seam_edge_strategy": "feathered_material_continuation",
+            "max_uniform_patch_share": 0.05,
+            "max_text_backplate_share": 0.01,
         },
         "preview_review_requirements": {
             k: True for k in pf.REQUIRED_REVIEW_FIELDS},
@@ -274,6 +283,21 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(rc2, 1)
         self.assertTrue(any("shape_language" in e for e in report2["errors"]),
                         report2["errors"])
+
+    def test_integration_constraints_reject_hard_coverups(self):
+        plan = full_plan()
+        plan["integration_constraints"]["no_opaque_rectangles"] = False
+        rc, report = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc, 1)
+        self.assertTrue(any("no_opaque_rectangles" in e
+                            for e in report["errors"]), report["errors"])
+
+        plan = full_plan()
+        plan["integration_constraints"]["max_text_backplate_share"] = 0.10
+        rc2, report2 = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc2, 1)
+        self.assertTrue(any("max_text_backplate_share" in e
+                            for e in report2["errors"]), report2["errors"])
 
     def test_invalid_atmosphere_rejected(self):
         plan = full_plan()
@@ -605,6 +629,11 @@ class VisualReviewTests(unittest.TestCase):
             "edge_tactility": "pass",
             "shape_serves_motion": "pass",
             "no_default_oval_island": "pass",
+            "no_hard_coverup_panels": "pass",
+            "text_integrated_into_material": "pass",
+            "no_uniform_wash_island": "pass",
+            "seam_material_continuity": "pass",
+            "paper_torn_read": "pass",
             "micro_text_legible": "not_applicable",
             "review_notes": "transitions blend into the paper grain",
         }
@@ -730,6 +759,11 @@ class RunnerTests(unittest.TestCase):
                            "edge_tactility": "pass",
                            "shape_serves_motion": "pass",
                            "no_default_oval_island": "pass",
+                           "no_hard_coverup_panels": "pass",
+                           "text_integrated_into_material": "pass",
+                           "no_uniform_wash_island": "pass",
+                           "seam_material_continuity": "pass",
+                           "paper_torn_read": "pass",
                            "micro_text_legible": "not_applicable",
                            "review_notes": "still reads as a rectangle"}, fh)
             proc = run_script("run_compositor.py", "--workdir", workdir,
@@ -802,6 +836,34 @@ class SmoothMaskTests(unittest.TestCase):
 
 
 class GenerationGuardTests(unittest.TestCase):
+
+    def test_photo_echo_mask_has_open_full_bleed_and_anchor_variation(self):
+        mask = pem.build_mask(420, 320, "top", 130, 62, 7, "ridge")
+        self.assertEqual(mask.shape, (320, 420))
+        self.assertTrue(np.all(mask[-1, :] == 255))
+        self.assertTrue(np.all(mask[:, 0] == 255))
+        self.assertTrue(np.all(mask[:, -1] == 255))
+        seam = np.argmax(mask == 255, axis=0)
+        self.assertGreater(int(seam.max() - seam.min()), 48)
+        self.assertGreater(int(np.count_nonzero(np.diff(seam))), 20)
+
+    def test_transition_clusters_are_sparse_and_protected(self):
+        with tempfile.TemporaryDirectory() as td:
+            mask_path = os.path.join(td, "mask.png")
+            out_path = os.path.join(td, "transition.png")
+            mask = np.zeros((180, 220), dtype=np.uint8)
+            mask[50:140, 55:165] = 255
+            Image.fromarray(mask).save(mask_path)
+            proc = run_script("build_transition_mask.py", "--mask", mask_path,
+                              "--canvas", "220x180", "--placement", "0,0",
+                              "--radius", "22", "--seed", "3", "--out",
+                              out_path)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            alpha = np.asarray(Image.open(out_path).convert("RGBA"))[:, :, 3]
+            self.assertEqual(int(alpha[80, 100]), 255)
+            editable = alpha == 0
+            self.assertGreater(int(editable.sum()), 0)
+            self.assertLess(int(editable.sum()), 220 * 180 * 0.16)
 
     def test_generation_output_normalization(self):
         with tempfile.TemporaryDirectory() as td:
