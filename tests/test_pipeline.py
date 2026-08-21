@@ -73,6 +73,14 @@ def full_plan(mode="subject_cutout", placement=None):
                 "placement": "upper-left quiet paper, typewriter serif",
             },
         },
+        "design_intent": {
+            "shape_language": "motion_brush",
+            "motion_axis": "forward-right",
+            "leading_mass": "the dog's head and front legs",
+            "trailing_taper": "the tail and rear grass taper back into paper",
+            "protected_context_budget": 0.34,
+            "rationale": "The protected shape stretches with the running gesture instead of becoming a static oval.",
+        },
         "preview_review_requirements": {
             k: True for k in pf.REQUIRED_REVIEW_FIELDS},
     }
@@ -251,6 +259,21 @@ class PreflightTests(unittest.TestCase):
         fusion_errors = [e for e in report["errors"]
                          if e.startswith("fusion.")]
         self.assertEqual(len(fusion_errors), 4, report["errors"])
+
+    def test_design_intent_required_and_directional(self):
+        plan = full_plan()
+        del plan["design_intent"]
+        rc, report = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc, 0, report["errors"])
+        self.assertTrue(any("legacy plan" in w for w in report["warnings"]),
+                        report["warnings"])
+
+        plan = full_plan()
+        plan["design_intent"]["shape_language"] = "organic_island"
+        rc2, report2 = self.run_preflight(plan, blob_mask())
+        self.assertEqual(rc2, 1)
+        self.assertTrue(any("shape_language" in e for e in report2["errors"]),
+                        report2["errors"])
 
     def test_invalid_atmosphere_rejected(self):
         plan = full_plan()
@@ -580,6 +603,8 @@ class VisualReviewTests(unittest.TestCase):
             "sticker_border": "pass",
             "transition_blending": "pass",
             "edge_tactility": "pass",
+            "shape_serves_motion": "pass",
+            "no_default_oval_island": "pass",
             "micro_text_legible": "not_applicable",
             "review_notes": "transitions blend into the paper grain",
         }
@@ -703,6 +728,8 @@ class RunnerTests(unittest.TestCase):
                            "sticker_border": "pass",
                            "transition_blending": "pass",
                            "edge_tactility": "pass",
+                           "shape_serves_motion": "pass",
+                           "no_default_oval_island": "pass",
                            "micro_text_legible": "not_applicable",
                            "review_notes": "still reads as a rectangle"}, fh)
             proc = run_script("run_compositor.py", "--workdir", workdir,

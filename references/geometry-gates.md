@@ -7,6 +7,13 @@ exit code 1.
 
 For these two modes the mask edge MUST obey all of the following:
 
+Choose a shape language from the plan's `design_intent`: `motion_brush`,
+`leaf_sweep`, `wedge_sweep`, `counterform`, or `contour_echo`. Geometry
+safety is necessary but not sufficient: a centered oval or evenly padded
+photo island can pass numeric gates while still reading as an un-designed
+container. The mask should have a leading mass and a trailing taper that
+agree with the subject's gesture or the declared eye path.
+
 - No rectangles, rounded rectangles, or regular torn edges.
 - No visually rectangular shapes: even below the hard rectangularity
   threshold, a mask is rejected when it is fairly full
@@ -29,6 +36,10 @@ For these two modes the mask edge MUST obey all of the following:
 - AI-generated transitions must be detached, locally open shapes away from the
   boundary. Never stroke along the full outline and never paint parallel
   bands tracing it.
+- At thumbnail size, the protected shape must communicate directional
+  asymmetry. If the subject is static, use a deliberate counterform or
+  contour echo and document the negative-space role instead of defaulting to
+  a centered pebble or oval.
 
 ## photo_window
 

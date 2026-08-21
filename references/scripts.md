@@ -157,6 +157,8 @@ python scripts/visual_review.py --check final-visual-review.json
   "transition_blending": "fail",
   "edge_tactility": "pass",
   "micro_text_legible": "not_applicable",
+  "shape_serves_motion": "pass",
+  "no_default_oval_island": "pass",
   "review_notes": "transition shapes cluster too close to the boundary"
 }
 ```
@@ -165,6 +167,11 @@ python scripts/visual_review.py --check final-visual-review.json
 (torn fiber, fringe) rather than a clean digital cutout.
 `micro_text_legible` asks whether the planned micro-text is correctly
 spelled and legible (`not_applicable` when `micro_text` was `null`).
+`shape_serves_motion` asks whether the protected shape has an intentional
+directional relationship to the subject gesture or declared eye path.
+`no_default_oval_island` asks whether the protected region avoids an
+uninspired centered oval or evenly padded photo island. A geometrically safe
+shape may still fail either design verdict.
 Verdicts must be `"pass"` or `"fail"` - `fail` is legal and expected when
 the render is not good enough. Any `fail` exits 1 with the instruction to
 regenerate ONLY the Stage B transition layer; the verified protected

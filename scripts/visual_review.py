@@ -22,6 +22,7 @@ Required review fields:
     rectangular_read, sticker_border, transition_blending,
     edge_tactility ("pass"/"fail"),
     micro_text_legible ("pass"/"fail"/"not_applicable"),
+    shape_serves_motion, no_default_oval_island ("pass"/"fail"),
     review_notes (non-empty string).
 
 edge_tactility asks: does the boundary read as a tactile paper edge (torn
@@ -41,7 +42,8 @@ import sys
 from PIL import Image
 
 VERDICT_FIELDS = ("rectangular_read", "sticker_border",
-                  "transition_blending", "edge_tactility")
+                  "transition_blending", "edge_tactility",
+                  "shape_serves_motion", "no_default_oval_island")
 TRI_VERDICT_FIELDS = ("micro_text_legible",)
 REQUIRED_FIELDS = ("review_image", "thumbnail_image", "review_notes") \
     + VERDICT_FIELDS + TRI_VERDICT_FIELDS

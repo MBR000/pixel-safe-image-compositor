@@ -15,6 +15,14 @@ and the same landmarks appear on both sides in two languages. Quiet
 zones are laid in with the planned `quiet_texture` (washes, halftone
 grain, paper fiber) - never left as blank untextured paper.
 
+The protected shape is part of the composition, not a neutral crop. Follow
+`design_intent.shape_language`, `motion_axis`, `leading_mass`, and
+`trailing_taper`. A running or directional subject should use a shape that
+stretches, points, or sweeps with the gesture. Do not center a default oval
+or evenly padded photo island merely because it is easy to mask. If a static
+subject needs a rounded shape, make it a deliberate `counterform` and state
+what negative space it creates.
+
 ## Stage B: transitions, torn edge, micro-text
 
 Generate the detached, locally open transition shapes, the torn-paper

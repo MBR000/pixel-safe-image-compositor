@@ -85,6 +85,16 @@ REQUIRED_REVIEW_FIELDS = (
     "quiet_buffer_visible",
     "detached_transition_shapes",
     "quiet_space_supports_eye_path",
+    "shape_serves_motion",
+    "no_default_oval_island",
+)
+
+DESIGN_SHAPE_LANGUAGES = (
+    "motion_brush",
+    "leaf_sweep",
+    "wedge_sweep",
+    "counterform",
+    "contour_echo",
 )
 
 # Geometry thresholds for organic modes.
@@ -538,6 +548,37 @@ def validate_atmosphere(atm, errors):
                         "paper area outside the protected region")
 
 
+def validate_design_intent(intent, errors, warnings):
+    """Require an authored shape direction, not just a safe blob."""
+    if not isinstance(intent, dict):
+        errors.append(
+            "design_intent must be an object describing the visual logic "
+            "of the protected shape")
+        return
+    language = intent.get("shape_language")
+    if language not in DESIGN_SHAPE_LANGUAGES:
+        errors.append(
+            "design_intent.shape_language must be one of %s, got %r; "
+            "generic oval/island is not a design direction"
+            % (", ".join(DESIGN_SHAPE_LANGUAGES), language))
+    for field in ("motion_axis", "leading_mass", "trailing_taper",
+                  "rationale"):
+        value = intent.get(field)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(
+                "design_intent.%s must be a non-empty design explanation"
+                % field)
+    budget = intent.get("protected_context_budget")
+    if (not isinstance(budget, (int, float)) or isinstance(budget, bool)
+            or not 0.10 <= budget <= 0.60):
+        errors.append(
+            "design_intent.protected_context_budget must be a number in "
+            "[0.10, 0.60], got %r" % budget)
+    if language == "counterform" and "negative_space_role" not in intent:
+        warnings.append(
+            "counterform shape should explain the negative-space role")
+
+
 def validate_plan(plan, errors, warnings):
     missing = [f for f in REQUIRED_PLAN_FIELDS if f not in plan]
     if missing:
@@ -617,6 +658,13 @@ def validate_plan(plan, errors, warnings):
             errors.append("fusion.%s must be a non-empty string" % f)
 
     validate_atmosphere(plan.get("atmosphere") or {}, errors)
+    if "design_intent" in plan:
+        validate_design_intent(plan.get("design_intent"), errors, warnings)
+    else:
+        warnings.append(
+            "legacy plan has no design_intent; new plans must declare a "
+            "directional shape language, motion axis, leading mass, and "
+            "trailing taper")
 
     review = plan.get("preview_review_requirements") or {}
     for f in REQUIRED_REVIEW_FIELDS:

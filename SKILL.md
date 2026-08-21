@@ -16,7 +16,7 @@ to the source. An AI render is never accepted as proof of source fidelity.
 ## References (read on demand)
 
 - `references/plan-schema.md` - full `composition-plan.json` schema with
-  JSON examples (`edge_profile`, `fusion`, `atmosphere`, `seam`,
+  JSON examples (`design_intent`, `edge_profile`, `fusion`, `atmosphere`, `seam`,
   `preview_review_requirements`). Read BEFORE writing the plan.
 - `references/geometry-gates.md` - hard mask-geometry gates per mode.
   Read before building the mask.
@@ -36,7 +36,10 @@ to the source. An AI render is never accepted as proof of source fidelity.
    pass dependency, credential, TLS/provider, source, and generation-size
    checks. A transport failure does not consume a generation attempt.
 3. Write `composition-plan.json` per `references/plan-schema.md`
-   (planning only, no pixels yet).
+   (planning only, no pixels yet). Every new plan must include
+   `design_intent`: choose a directional shape language, name the subject's
+   motion axis, state the leading mass and trailing taper, cap the retained
+   context budget, and explain why the shape supports the eye path.
 4. Build the protected-region mask. Smooth it with
    `scripts/smooth_mask.py` (Chaikin corner cutting on a polygon, or
    blur-smoothing a rough mask). The mask must be binary (0/255):
@@ -100,7 +103,8 @@ AI Stage B rejection from an accepted deterministic fallback.
   canvas edges and one torn seam separates it from the illustrated layer.
   Strongest "one continuous world on paper" read.
 - `subject_cutout` / `organic_context` - isolated subjects on an organic
-  free-form mask.
+  free-form mask. Prefer these when the subject has a readable gesture or
+  silhouette that can drive a directional shape.
 - `photo_window` - only when an explicit rectangular photo frame is
   wanted.
 
@@ -115,6 +119,12 @@ AI Stage B rejection from an accepted deterministic fallback.
   near-straight segment at any angle longer than 15%; no regular
   sawtooth; three-scale boundary variation; quiet paper buffer outside
   the edge. Full gates in `references/geometry-gates.md`.
+- Design gate: do not use a centered oval, pebble, or evenly padded
+  bounding-island as the default protected shape. The selected shape must
+  have directional asymmetry tied to the subject's motion axis: a
+  `motion_brush`, `leaf_sweep`, `wedge_sweep`, `counterform`, or
+  `contour_echo` language. A geometrically safe blob can still fail visual
+  review when it does not change the eye path or figure-ground.
 - `photo_echo`: the mask covers at least 25% of the canvas perimeter;
   border-hugging segments are exempt from straightness checks; the
   interior torn seam must pass every organic gate; the declared
@@ -124,6 +134,10 @@ AI Stage B rejection from an accepted deterministic fallback.
   planned `quiet_texture` (blank paper is rejected); exactly ONE
   structural chromatic accent; `micro_text` is the only permitted
   AI-generated text.
+- Visual review must explicitly pass `shape_serves_motion` and
+  `no_default_oval_island`; if either fails, redesign the protected shape
+  before retrying Stage B. Do not polish a weak silhouette with extra fibers
+  or color.
 - Never treat AI output as evidence that the source pixels survived; the
   only proof is the SHA-256 report from `restore_and_verify.py`.
 - Never start a paid request when environment or geometry preflight fails.

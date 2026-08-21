@@ -23,6 +23,7 @@ invalid field.
 | `fusion` | Structured blending plan (see below) |
 | `atmosphere` | Editorial-collage design layer (see below) |
 | `preview_review_requirements` | Pre-generation commitments (see below) |
+| `design_intent` | Authored shape language and motion logic (see below) |
 | `seam` | photo_echo only: `{anchor, side}` for the torn seam (see below) |
 
 ## generation_contract (recommended)
@@ -67,6 +68,33 @@ coordinates in a prompt are supporting context, never the sole constraint.
 - `variation_scales` must include `large`, `medium`, and `small`.
 - `no_sawtooth` must be `true`; `detached_transition` must be `true`.
 - `quiet_buffer_px` is the quiet paper buffer kept outside the protected edge.
+
+## design_intent (required keys)
+
+The protected shape is a composition element, not a neutral container. New
+plans must state why its silhouette supports the subject's gesture and eye
+path. Do not default to a centered oval, pebble, or full subject bounding
+island unless the design rationale explicitly makes that shape carry a
+counterform role.
+
+```json
+{
+  "design_intent": {
+    "shape_language": "motion_brush",
+    "motion_axis": "forward-right",
+    "leading_mass": "dog head and front legs",
+    "trailing_taper": "tail and rear grass taper into paper",
+    "protected_context_budget": 0.34,
+    "rationale": "The shape stretches with the running gesture instead of becoming a static oval."
+  }
+}
+```
+
+`shape_language` must be one of `motion_brush`, `leaf_sweep`,
+`wedge_sweep`, `counterform`, or `contour_echo`. `protected_context_budget`
+is the approximate fraction of the source crop retained around the focal
+subject and must stay between `0.10` and `0.60`. `leading_mass` and
+`trailing_taper` make the directional asymmetry explicit.
 
 ## fusion (required keys)
 
@@ -186,3 +214,5 @@ is `final-visual-review.json`, where `fail` is a legal verdict.
 - `quiet_buffer_visible`
 - `detached_transition_shapes`
 - `quiet_space_supports_eye_path`
+- `shape_serves_motion`
+- `no_default_oval_island`
